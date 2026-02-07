@@ -1,9 +1,14 @@
 import json
 import time
+import logging
 import boto3
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
 from botocore.config import Config
 import config
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # S3 availability cache with TTL
 _s3_available: bool | None = None
@@ -34,9 +39,12 @@ def is_s3_available() -> bool:
         return False
 
     try:
+        logger.info(f"Checking S3 connectivity to {config.S3_ENDPOINT}...")
         s3_client.list_buckets()
         _s3_available = True
-    except (EndpointConnectionError, NoCredentialsError, ClientError):
+        logger.info("S3 is available")
+    except (EndpointConnectionError, NoCredentialsError, ClientError) as e:
+        logger.error(f"S3 not available: {type(e).__name__}: {e}")
         _s3_available = False
     _s3_check_time = now
     return _s3_available
@@ -55,25 +63,35 @@ def ensure_bucket_exists(bucket_name: str) -> None:
 
 
 def get_project(project_id: str) -> dict | None:
+    logger.info(f"Getting project {project_id} from bucket {config.S3_BUCKET}")
     if not is_s3_available():
+        logger.warning(f"Cannot get project {project_id}: S3 not available")
         return None
     try:
         response = s3_client.get_object(
             Bucket=config.S3_BUCKET,
             Key=f"project-{project_id}.json",
         )
-        return json.loads(response["Body"].read().decode("utf-8"))
+        data = json.loads(response["Body"].read().decode("utf-8"))
+        logger.info(f"Successfully retrieved project {project_id}")
+        return data
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            logger.warning(f"Project {project_id} not found in S3")
             return None
+        logger.error(f"ClientError getting project {project_id}: {e}")
         raise
-    except EndpointConnectionError:
+    except EndpointConnectionError as e:
+        logger.error(f"Connection error getting project {project_id}: {e}")
         return None
 
 
-def put_project(project_id: str, data: dict) -> dict:
+def put_project(project_id: str, data: dict) -> tuple[dict, bool]:
+    """Store a project. Returns (data, success) tuple."""
+    logger.info(f"Putting project {project_id} to bucket {config.S3_BUCKET}")
     if not is_s3_available():
-        return data
+        logger.error(f"Cannot save project {project_id}: S3 not available")
+        return data, False
 
     ensure_bucket_exists(config.S3_BUCKET)
 
@@ -85,9 +103,11 @@ def put_project(project_id: str, data: dict) -> dict:
             Body=json_data.encode("utf-8"),
             ContentType="application/json",
         )
-    except (ClientError, EndpointConnectionError):
-        pass
-    return data
+        logger.info(f"Successfully saved project {project_id}")
+        return data, True
+    except (ClientError, EndpointConnectionError) as e:
+        logger.error(f"Failed to save project {project_id}: {type(e).__name__}: {e}")
+        return data, False
 
 
 def get_project_metadata(project_id: str) -> dict | None:

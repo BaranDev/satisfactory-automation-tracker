@@ -34,7 +34,12 @@ async def create_project(request: CreateProjectRequest = CreateProjectRequest())
         "items": {}
     }
     
-    storage.put_project(project_id, project)
+    _, success = storage.put_project(project_id, project)
+    if not success:
+        raise HTTPException(
+            status_code=503,
+            detail="Storage service unavailable. Please try again later."
+        )
     return project
 
 
@@ -85,7 +90,12 @@ async def update_project(
     project_data["version"] = (existing.get("version", 0) if existing else 0) + 1
     project_data["last_updated"] = datetime.now(timezone.utc).isoformat()
     
-    storage.put_project(project_id, project_data)
+    _, success = storage.put_project(project_id, project_data)
+    if not success:
+        raise HTTPException(
+            status_code=503,
+            detail="Storage service unavailable. Please try again later."
+        )
     
     return {
         "success": True,
