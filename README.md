@@ -1,171 +1,152 @@
 # Satisfactory Automation Tracker
 
-Track automated items in your Satisfactory factory, simulate production rates, and get improvement suggestions. Share your project with friends via a simple URL — no accounts needed.
+Track automated items in your Satisfactory factory, simulate production rates, and get improvement suggestions. Share your project with friends via a simple URL, no accounts needed.
 
 ## Features
 
-- ✅ Track which items are automated
-- ⚡ Real-time production simulation
-- 🔍 Bottleneck detection
-- 💡 Improvement suggestions
-- 🔗 Shareable project links
-- ☁️ Cloud sync (push/pull)
-- 📄 PDF export
-- 🌐 No authentication required
+- **Automation Tracking** - Mark items as automated with machine counts and overclock settings
+- **Real-time Simulation** - Calculate production rates from recipes
+- **Bottleneck Detection** - Find limiting factors in production chains
+- **Improvement Suggestions** - Get optimization recommendations
+- **Shareable Links** - Share via URL, no accounts needed
+- **Cloud Sync** - Push/pull with automatic conflict resolution
+- **Live Updates** - Auto-detects when collaborators make changes
+- **Undo Support** - Restore previous state after pulling remote changes
+- **AI Assistant** - FICSIT AI for factory tips
+
+---
 
 ## Tech Stack
 
-- **Frontend**: React, Vite, TypeScript, Tailwind CSS, shadcn/ui, Framer Motion
-- **Backend**: FastAPI (Python), boto3
-- **Storage**: RustFS/MinIO (S3-compatible)
-- **Containerization**: Docker, Docker Compose
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | React, Vite, TypeScript, Tailwind CSS, shadcn/ui, Zustand |
+| **Backend** | FastAPI (Python), boto3 |
+| **Storage** | MinIO (S3-compatible) |
 
-## Quick Start (Local Development)
+---
+
+## Local Development
 
 ### Prerequisites
 
-- Docker & Docker Compose
-- Node.js 20+ (for local frontend dev)
-- Python 3.11+ (for local backend dev)
+- Node.js 20+
+- Python 3.11+
 
-### Using Docker Compose
+### Backend Setup
 
-```bash
-# Start all services (MinIO, backend, frontend)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-Access the app at http://localhost:3000
-
-### Local Development (Without Docker)
-
-**Backend:**
 ```bash
 cd backend
+
+# Create virtual environment
+python -m venv venv
+.\venv\Scripts\activate  # Windows
+source venv/bin/activate  # Linux/Mac
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Set environment variables
-export S3_ENDPOINT=http://localhost:9000
-export S3_ACCESS_KEY=minioadmin
-export S3_SECRET_KEY=minioadmin
-export S3_BUCKET=satisfactory-tracker
+# Copy and edit environment file
+cp .env.example .env
+# Edit .env with your S3 credentials
 
-# Run
+# Run server
 uvicorn main:app --reload --port 8000
 ```
 
-**Frontend:**
+### Frontend Setup
+
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
+
+# Optional: customize poll interval
+echo "VITE_POLL_INTERVAL_MS=5000" > .env
+
+# Run dev server
 npm run dev
 ```
 
-Access the app at http://localhost:5173
+### Access Points
 
-### MinIO (Local S3)
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
 
-If running locally without Docker Compose, start MinIO separately:
+---
 
-```bash
-docker run -d \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  --name minio \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  minio/minio server /data --console-address ":9001"
-```
+## Environment Variables
 
-MinIO Console: http://localhost:9001
+### Backend (.env)
 
-## Image Scraper
+| Variable | Description |
+|----------|-------------|
+| `S3_ENDPOINT` | MinIO/S3 endpoint URL |
+| `S3_ACCESS_KEY` | S3 access key |
+| `S3_SECRET_KEY` | S3 secret key |
+| `S3_BUCKET` | Bucket for project data |
+| `ASSETS_BUCKET` | Bucket for item icons |
+| `ASSETS_BASE_URL` | Public URL for assets |
+| `CORS_ORIGINS` | Allowed origins (comma-separated) |
 
-The scraper is a standalone Python script that fetches item images from the Satisfactory Wiki, converts them to WebP, and uploads to S3.
+### Frontend (.env)
 
-```bash
-cd scraper
-pip install -r requirements.txt
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_POLL_INTERVAL_MS` | Update check interval (ms) | `5000` |
 
-# Set environment variables
-export S3_ENDPOINT=http://localhost:9000
-export S3_ACCESS_KEY=minioadmin
-export S3_SECRET_KEY=minioadmin
-export S3_BUCKET=satisfactory-assets
+---
 
-# Run once
-python scraper.py
-```
+## Sync and Collaboration
 
-⚠️ **Note**: The scraper is rate-limited (1 request/second) to be polite to the wiki.
+1. **Save** - Push local changes to cloud
+2. **Live Detection** - App polls for remote updates (configurable interval)
+3. **Conflict Resolution** - Choose "Use Remote" or "Overwrite" when conflicts occur
+4. **Undo** - Restore previous state after pulling remote changes
 
-## Production Deployment (Dokploy)
-
-1. Push your code to a Git repository
-
-2. Create a new project in Dokploy
-
-3. Add services:
-   - **Backend**: Docker deployment from `./backend`
-   - **Frontend**: Docker deployment from `./frontend`
-   - **RustFS**: See [RustFS installation](https://docs.rustfs.com/installation/)
-
-4. Set environment variables for backend:
-   ```
-   S3_ENDPOINT=https://your-rustfs-endpoint
-   S3_ACCESS_KEY=your-access-key
-   S3_SECRET_KEY=your-secret-key
-   S3_BUCKET=satisfactory-tracker
-   ASSETS_BUCKET=satisfactory-assets
-   ASSETS_BASE_URL=https://your-rustfs-endpoint/satisfactory-assets
-   CORS_ORIGINS=https://your-frontend-domain
-   ```
-
-5. Configure domain/SSL in Dokploy
+---
 
 ## Project Structure
 
 ```
-satisfactory-automation-tracker/
-├── frontend/                 # React frontend
+├── frontend/           # React app
 │   ├── src/
-│   │   ├── components/       # UI components
-│   │   ├── pages/            # Route pages
-│   │   ├── store/            # Zustand state
-│   │   ├── lib/              # Utilities, API, simulation
-│   │   ├── data/             # Static recipe data
-│   │   └── types/            # TypeScript types
-│   ├── Dockerfile
-│   └── nginx.conf
-├── backend/                  # FastAPI backend
-│   ├── routes/               # API routes
-│   ├── main.py               # App entry
-│   ├── config.py             # Environment config
-│   ├── storage.py            # S3 client
-│   ├── models.py             # Pydantic models
+│   │   ├── components/ # UI components
+│   │   ├── store/      # Zustand state
+│   │   ├── hooks/      # Custom hooks
+│   │   └── lib/        # API, utils
 │   └── Dockerfile
-├── scraper/                  # Standalone image scraper
-│   ├── scraper.py
-│   └── requirements.txt
-├── docker-compose.yml        # Local dev setup
-└── README.md
+├── backend/            # FastAPI server
+│   ├── routes/         # API endpoints
+│   ├── storage.py      # S3 client
+│   └── Dockerfile
+├── scraper/            # Image scraper
+└── docker-compose.yml
 ```
+
+---
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/project` | Create new project |
-| GET | `/api/project/{id}` | Get project by ID |
-| PUT | `/api/project/{id}` | Update project |
-| GET | `/api/assets` | List asset keys |
-| GET | `/api/assets/{key}` | Get asset URL |
+| `POST` | `/api/project` | Create project |
+| `GET` | `/api/project/{id}` | Get project |
+| `PUT` | `/api/project/{id}` | Update project |
+| `GET` | `/api/storage-status` | Check S3 connectivity |
+| `GET` | `/api/assets` | List assets |
+
+---
+
+## Production Deployment
+
+Use `docker-compose.dokploy.yml` with your S3 credentials set as environment variables.
+
+---
 
 ## License
 

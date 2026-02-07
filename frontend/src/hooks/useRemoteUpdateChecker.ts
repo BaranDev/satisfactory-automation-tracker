@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useProjectStore } from "@/store/projectStore";
 import * as api from "@/lib/api";
 
-const POLL_INTERVAL_MS = 30000; // 30 seconds
+const POLL_INTERVAL_MS = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS || "5000", 10);
 const STORAGE_KEY = "sap-hide-pull-warning";
 
 interface UseRemoteUpdateCheckerResult {
