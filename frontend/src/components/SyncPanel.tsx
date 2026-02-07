@@ -64,7 +64,10 @@ export default function SyncPanel() {
     }
   };
 
-  const statusConfig = {
+  const statusConfig: Record<
+    string,
+    { label: string; color: string; bgColor: string; icon: typeof Cloud }
+  > = {
     in_sync: {
       label: "In Sync",
       color: "text-green-500",
@@ -83,15 +86,15 @@ export default function SyncPanel() {
       bgColor: "bg-blue-500/10",
       icon: Cloud,
     },
-    unknown: {
-      label: "Unknown",
+    no_cloud: {
+      label: "Not Synced",
       color: "text-muted-foreground",
       bgColor: "bg-muted/10",
       icon: Cloud,
     },
   };
 
-  const status = statusConfig[syncStatus];
+  const status = statusConfig[syncStatus] ?? statusConfig.no_cloud;
   const StatusIcon = status.icon;
 
   return (
