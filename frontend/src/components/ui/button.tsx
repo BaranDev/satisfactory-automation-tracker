@@ -16,11 +16,11 @@ const buttonVariants = cva(
           "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+        ghost: "hover:bg-secondary/60 hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        neon: "bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 hover:shadow-[0_0_20px_rgba(0,245,255,0.3)]",
+        neon: "bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 hover:shadow-[0_0_20px_rgba(232,131,12,0.2)]",
         "neon-pink":
-          "bg-accent/20 text-accent border border-accent/50 hover:bg-accent/30 hover:shadow-[0_0_20px_rgba(255,0,255,0.3)]",
+          "bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 hover:shadow-[0_0_20px_rgba(0,212,255,0.2)]",
       },
       size: {
         default: "h-10 px-4 py-2",

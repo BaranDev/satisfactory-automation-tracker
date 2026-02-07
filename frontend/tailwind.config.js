@@ -38,11 +38,18 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        ficsit: {
+          orange: "#e8830c",
+          amber: "#f59e0b",
+          dark: "#0a0e17",
+          surface: "#111827",
+          blue: "#1e3a5f",
+        },
         neon: {
-          cyan: "#00f5ff",
-          pink: "#ff00ff",
+          cyan: "#00d4ff",
           green: "#00ff88",
           orange: "#ff8800",
+          red: "#ff3344",
         },
       },
       borderRadius: {
@@ -71,12 +78,17 @@ export default {
             boxShadow: "0 0 20px var(--neon-color), 0 0 30px var(--neon-color)",
           },
         },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-neon": "pulse-neon 2s ease-in-out infinite",
         glow: "glow 2s ease-in-out infinite",
+        shimmer: "shimmer 3s ease-in-out infinite",
       },
       backdropBlur: {
         xs: "2px",
