@@ -5,6 +5,11 @@ import {
   calcOutputPerMin,
 } from "@/lib/simulation";
 import * as api from "@/lib/api";
+import {
+  simulate as runSimulation,
+  calcOutputPerMin,
+} from "@/lib/simulation";
+import * as api from "@/lib/api";
 import type { ProjectData } from "@/lib/api";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -19,7 +24,32 @@ type ItemState = ProjectData["items"][string];
 
 interface DisplayBottleneck {
   itemKey: string;
+type ItemState = ProjectData["items"][string];
+
+interface DisplayBottleneck {
+  itemKey: string;
   label: string;
+  shortfall: number;
+  shortfallPercent: number;
+  neededMachines: number;
+}
+
+interface DisplaySuggestion {
+  itemKey: string;
+  message: string;
+}
+
+interface DisplayItemResult {
+  outputPerMin: number;
+  isBottleneck: boolean;
+  isSurplus: boolean;
+}
+
+export interface DisplaySimResult {
+  items: Record<string, DisplayItemResult>;
+  bottlenecks: DisplayBottleneck[];
+  suggestions: DisplaySuggestion[];
+  rawMaterials: Record<string, number>;
   shortfall: number;
   shortfallPercent: number;
   neededMachines: number;
@@ -100,10 +130,20 @@ function buildFullItems(
   saved: Record<string, Partial<ItemState>> = {}
 ): ProjectData["items"] {
   const result: ProjectData["items"] = {};
+function buildFullItems(
+  saved: Record<string, Partial<ItemState>> = {}
+): ProjectData["items"] {
+  const result: ProjectData["items"] = {};
 
   for (const [key, info] of Object.entries(ITEMS)) {
     const s = saved[key];
+    const s = saved[key];
     result[key] = {
+      label: s?.label ?? info.label,
+      icon: s?.icon ?? info.icon,
+      automated: s?.automated ?? false,
+      machines: s?.machines ?? 1,
+      overclock: s?.overclock ?? 1.0,
       label: s?.label ?? info.label,
       icon: s?.icon ?? info.icon,
       automated: s?.automated ?? false,
@@ -114,8 +154,14 @@ function buildFullItems(
 
   // Include any items from cloud that aren't in our local DB
   for (const [key, s] of Object.entries(saved)) {
+  for (const [key, s] of Object.entries(saved)) {
     if (!result[key]) {
       result[key] = {
+        label: s.label ?? key,
+        icon: s.icon,
+        automated: s.automated ?? false,
+        machines: s.machines ?? 1,
+        overclock: s.overclock ?? 1.0,
         label: s.label ?? key,
         icon: s.icon,
         automated: s.automated ?? false,
@@ -500,9 +546,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (prev) {
       set({
         project: prev,
+        project: prev,
         previousState: null,
         syncStatus: "local_changes",
       });
     }
   },
+}));
+
 }));
