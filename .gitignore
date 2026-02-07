@@ -1,0 +1,43 @@
+# General
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+tmp/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python (Backend & Scraper)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node.js (Frontend)
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+.docusaurus/
+.cache/
+*.tsbuildinfo
+
+# Docker
+docker-compose.override.yml
+
+# Checkpoints and models (if any)
+*.ckpt
+*.pt
+*.pth

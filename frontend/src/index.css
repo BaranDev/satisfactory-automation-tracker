@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 174 100% 50%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 280 100% 60%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 174 100% 50%;
+
+    --radius: 0.75rem;
+
+    --neon-cyan: #00f5ff;
+    --neon-pink: #ff00ff;
+    --neon-green: #00ff88;
+    --neon-orange: #ff8800;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", "Outfit", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Glass morphism utility */
+.glass {
+  @apply bg-card/70 backdrop-blur-md border border-white/10;
+}
+
+.glass-strong {
+  @apply bg-card/90 backdrop-blur-xl border border-white/20;
+}
+
+/* Neon glow utilities */
+.neon-cyan {
+  --neon-color: var(--neon-cyan);
+  box-shadow:
+    0 0 10px var(--neon-cyan),
+    0 0 20px rgba(0, 245, 255, 0.3);
+}
+
+.neon-pink {
+  --neon-color: var(--neon-pink);
+  box-shadow:
+    0 0 10px var(--neon-pink),
+    0 0 20px rgba(255, 0, 255, 0.3);
+}
+
+.neon-green {
+  --neon-color: var(--neon-green);
+  box-shadow:
+    0 0 10px var(--neon-green),
+    0 0 20px rgba(0, 255, 136, 0.3);
+}
+
+.neon-orange {
+  --neon-color: var(--neon-orange);
+  box-shadow:
+    0 0 10px var(--neon-orange),
+    0 0 20px rgba(255, 136, 0, 0.3);
+}
+
+/* Neon text glow */
+.text-glow-cyan {
+  text-shadow:
+    0 0 10px var(--neon-cyan),
+    0 0 20px var(--neon-cyan);
+}
+
+.text-glow-pink {
+  text-shadow:
+    0 0 10px var(--neon-pink),
+    0 0 20px var(--neon-pink);
+}
+
+.text-glow-green {
+  text-shadow:
+    0 0 10px var(--neon-green),
+    0 0 20px var(--neon-green);
+}
+
+/* Animated border gradient */
+.border-gradient {
+  position: relative;
+}
+
+.border-gradient::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(
+    45deg,
+    var(--neon-cyan),
+    var(--neon-pink),
+    var(--neon-cyan)
+  );
+  background-size: 200% 200%;
+  border-radius: inherit;
+  z-index: -1;
+  animation: gradient-rotate 3s linear infinite;
+}
+
+@keyframes gradient-rotate {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* React Flow customization */
+.react-flow__node {
+  @apply glass rounded-lg;
+}
+
+.react-flow__edge-path {
+  stroke: var(--neon-cyan);
+  stroke-width: 2;
+}
+
+.react-flow__background {
+  background-color: hsl(222, 47%, 4%);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground;
+}
+
+/* Animation for number counters */
+.number-animate {
+  transition: all 0.3s ease-out;
+}
+
+/* Bottleneck pulse animation */
+.bottleneck {
+  animation: bottleneck-pulse 2s ease-in-out infinite;
+}
+
+@keyframes bottleneck-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px rgba(239, 68, 68, 0.5),
+      0 0 20px rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 20px rgba(239, 68, 68, 0.8),
+      0 0 40px rgba(239, 68, 68, 0.5);
+  }
+}
+
+/* Healthy node glow */
+.healthy {
+  animation: healthy-glow 2s ease-in-out infinite;
+}
+
+@keyframes healthy-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px rgba(0, 255, 136, 0.5),
+      0 0 20px rgba(0, 255, 136, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 15px rgba(0, 255, 136, 0.7),
+      0 0 30px rgba(0, 255, 136, 0.4);
+  }
+}

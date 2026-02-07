@@ -1,0 +1,247 @@
+{
+  "recipes": [
+    {
+      "id": "iron_ingot",
+      "label": "Iron Ingot",
+      "machine_type": "smelter",
+      "craft_time_sec": 2,
+      "outputs": [{ "item": "iron_ingot", "amount": 1 }],
+      "inputs": [{ "item": "iron_ore", "amount": 1 }]
+    },
+    {
+      "id": "iron_plate",
+      "label": "Iron Plate",
+      "machine_type": "constructor",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "iron_plate", "amount": 2 }],
+      "inputs": [{ "item": "iron_ingot", "amount": 3 }]
+    },
+    {
+      "id": "iron_rod",
+      "label": "Iron Rod",
+      "machine_type": "constructor",
+      "craft_time_sec": 4,
+      "outputs": [{ "item": "iron_rod", "amount": 1 }],
+      "inputs": [{ "item": "iron_ingot", "amount": 1 }]
+    },
+    {
+      "id": "screw",
+      "label": "Screw",
+      "machine_type": "constructor",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "screw", "amount": 4 }],
+      "inputs": [{ "item": "iron_rod", "amount": 1 }]
+    },
+    {
+      "id": "wire",
+      "label": "Wire",
+      "machine_type": "constructor",
+      "craft_time_sec": 4,
+      "outputs": [{ "item": "wire", "amount": 2 }],
+      "inputs": [{ "item": "copper_ingot", "amount": 1 }]
+    },
+    {
+      "id": "copper_ingot",
+      "label": "Copper Ingot",
+      "machine_type": "smelter",
+      "craft_time_sec": 2,
+      "outputs": [{ "item": "copper_ingot", "amount": 1 }],
+      "inputs": [{ "item": "copper_ore", "amount": 1 }]
+    },
+    {
+      "id": "cable",
+      "label": "Cable",
+      "machine_type": "constructor",
+      "craft_time_sec": 2,
+      "outputs": [{ "item": "cable", "amount": 1 }],
+      "inputs": [{ "item": "wire", "amount": 2 }]
+    },
+    {
+      "id": "concrete",
+      "label": "Concrete",
+      "machine_type": "constructor",
+      "craft_time_sec": 4,
+      "outputs": [{ "item": "concrete", "amount": 1 }],
+      "inputs": [{ "item": "limestone", "amount": 3 }]
+    },
+    {
+      "id": "reinforced_iron_plate",
+      "label": "Reinforced Iron Plate",
+      "machine_type": "assembler",
+      "craft_time_sec": 12,
+      "outputs": [{ "item": "reinforced_iron_plate", "amount": 1 }],
+      "inputs": [
+        { "item": "iron_plate", "amount": 6 },
+        { "item": "screw", "amount": 12 }
+      ]
+    },
+    {
+      "id": "rotor",
+      "label": "Rotor",
+      "machine_type": "assembler",
+      "craft_time_sec": 15,
+      "outputs": [{ "item": "rotor", "amount": 1 }],
+      "inputs": [
+        { "item": "iron_rod", "amount": 5 },
+        { "item": "screw", "amount": 25 }
+      ]
+    },
+    {
+      "id": "modular_frame",
+      "label": "Modular Frame",
+      "machine_type": "assembler",
+      "craft_time_sec": 60,
+      "outputs": [{ "item": "modular_frame", "amount": 2 }],
+      "inputs": [
+        { "item": "reinforced_iron_plate", "amount": 3 },
+        { "item": "iron_rod", "amount": 12 }
+      ]
+    },
+    {
+      "id": "steel_ingot",
+      "label": "Steel Ingot",
+      "machine_type": "foundry",
+      "craft_time_sec": 4,
+      "outputs": [{ "item": "steel_ingot", "amount": 3 }],
+      "inputs": [
+        { "item": "iron_ore", "amount": 3 },
+        { "item": "coal", "amount": 3 }
+      ]
+    },
+    {
+      "id": "steel_beam",
+      "label": "Steel Beam",
+      "machine_type": "constructor",
+      "craft_time_sec": 4,
+      "outputs": [{ "item": "steel_beam", "amount": 1 }],
+      "inputs": [{ "item": "steel_ingot", "amount": 4 }]
+    },
+    {
+      "id": "steel_pipe",
+      "label": "Steel Pipe",
+      "machine_type": "constructor",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "steel_pipe", "amount": 2 }],
+      "inputs": [{ "item": "steel_ingot", "amount": 3 }]
+    },
+    {
+      "id": "encased_industrial_beam",
+      "label": "Encased Industrial Beam",
+      "machine_type": "assembler",
+      "craft_time_sec": 10,
+      "outputs": [{ "item": "encased_industrial_beam", "amount": 1 }],
+      "inputs": [
+        { "item": "steel_beam", "amount": 4 },
+        { "item": "concrete", "amount": 5 }
+      ]
+    },
+    {
+      "id": "stator",
+      "label": "Stator",
+      "machine_type": "assembler",
+      "craft_time_sec": 12,
+      "outputs": [{ "item": "stator", "amount": 1 }],
+      "inputs": [
+        { "item": "steel_pipe", "amount": 3 },
+        { "item": "wire", "amount": 8 }
+      ]
+    },
+    {
+      "id": "motor",
+      "label": "Motor",
+      "machine_type": "assembler",
+      "craft_time_sec": 12,
+      "outputs": [{ "item": "motor", "amount": 1 }],
+      "inputs": [
+        { "item": "rotor", "amount": 2 },
+        { "item": "stator", "amount": 2 }
+      ]
+    },
+    {
+      "id": "circuit_board",
+      "label": "Circuit Board",
+      "machine_type": "assembler",
+      "craft_time_sec": 8,
+      "outputs": [{ "item": "circuit_board", "amount": 1 }],
+      "inputs": [
+        { "item": "copper_sheet", "amount": 2 },
+        { "item": "plastic", "amount": 4 }
+      ]
+    },
+    {
+      "id": "copper_sheet",
+      "label": "Copper Sheet",
+      "machine_type": "constructor",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "copper_sheet", "amount": 1 }],
+      "inputs": [{ "item": "copper_ingot", "amount": 2 }]
+    },
+    {
+      "id": "plastic",
+      "label": "Plastic",
+      "machine_type": "refinery",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "plastic", "amount": 2 }],
+      "inputs": [{ "item": "crude_oil", "amount": 3 }]
+    },
+    {
+      "id": "rubber",
+      "label": "Rubber",
+      "machine_type": "refinery",
+      "craft_time_sec": 6,
+      "outputs": [{ "item": "rubber", "amount": 2 }],
+      "inputs": [{ "item": "crude_oil", "amount": 3 }]
+    },
+    {
+      "id": "computer",
+      "label": "Computer",
+      "machine_type": "manufacturer",
+      "craft_time_sec": 24,
+      "outputs": [{ "item": "computer", "amount": 1 }],
+      "inputs": [
+        { "item": "circuit_board", "amount": 10 },
+        { "item": "cable", "amount": 9 },
+        { "item": "plastic", "amount": 18 },
+        { "item": "screw", "amount": 52 }
+      ]
+    },
+    {
+      "id": "heavy_modular_frame",
+      "label": "Heavy Modular Frame",
+      "machine_type": "manufacturer",
+      "craft_time_sec": 30,
+      "outputs": [{ "item": "heavy_modular_frame", "amount": 1 }],
+      "inputs": [
+        { "item": "modular_frame", "amount": 5 },
+        { "item": "steel_pipe", "amount": 15 },
+        { "item": "encased_industrial_beam", "amount": 5 },
+        { "item": "screw", "amount": 100 }
+      ]
+    }
+  ],
+  "raw_materials": [
+    "iron_ore",
+    "copper_ore",
+    "limestone",
+    "coal",
+    "crude_oil",
+    "water",
+    "caterium_ore",
+    "sulfur",
+    "bauxite",
+    "raw_quartz",
+    "nitrogen_gas",
+    "uranium"
+  ],
+  "machines": {
+    "smelter": { "power_mw": 4 },
+    "constructor": { "power_mw": 4 },
+    "assembler": { "power_mw": 15 },
+    "manufacturer": { "power_mw": 55 },
+    "foundry": { "power_mw": 16 },
+    "refinery": { "power_mw": 30 },
+    "packager": { "power_mw": 10 },
+    "blender": { "power_mw": 75 },
+    "particle_accelerator": { "power_mw": 500 }
+  }
+}
