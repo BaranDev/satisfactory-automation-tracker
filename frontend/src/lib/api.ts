@@ -88,6 +88,22 @@ export async function getProject(
   }
 }
 
+/** Check cloud version (lightweight version check for polling) */
+export async function checkCloudVersion(
+  projectId: string
+): Promise<{ version: number; lastUpdated: string } | null> {
+  try {
+    const data = await request<ProjectData>(`/project/${projectId}`);
+    return {
+      version: data.version,
+      lastUpdated: data.last_updated,
+    };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 /** Push project to cloud */
 export async function updateProject(
   projectId: string,

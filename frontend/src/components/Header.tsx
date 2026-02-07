@@ -13,9 +13,11 @@ import {
   Loader2,
   Github,
   AlertTriangle,
+  RefreshCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +28,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useProjectStore } from "@/store/projectStore";
+import { useRemoteUpdateChecker } from "@/hooks/useRemoteUpdateChecker";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +45,8 @@ export default function Header() {
     pullFromCloud,
   } = useProjectStore();
   const { toast } = useToast();
+  const { hasRemoteUpdate, remoteVersion, hideWarning, setHideWarning } =
+    useRemoteUpdateChecker();
   const [copied, setCopied] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -49,6 +54,8 @@ export default function Header() {
   const [importData, setImportData] = useState("");
   const [isPushing, setIsPushing] = useState(false);
   const [showConflict, setShowConflict] = useState(false);
+  const [showPullWarning, setShowPullWarning] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
 
   if (!project) return null;
 
@@ -129,6 +136,26 @@ export default function Header() {
         description: "Your changes saved to cloud",
       });
     }
+  };
+
+  const handlePullWithWarning = () => {
+    if (hideWarning) {
+      // User chose to never show warning again
+      handlePullNewChanges();
+    } else {
+      setShowPullWarning(true);
+    }
+  };
+
+  const handlePullNewChanges = async () => {
+    setIsPushing(true);
+    await pullFromCloud();
+    setIsPushing(false);
+    setShowPullWarning(false);
+    if (dontShowAgain) {
+      setHideWarning(true);
+    }
+    toast({ title: "Updated", description: "Got the latest changes" });
   };
 
   const syncColor =
@@ -258,6 +285,19 @@ export default function Header() {
           </span>
         </button>
 
+        {/* New changes available button */}
+        {hasRemoteUpdate && syncStatus !== "cloud_newer" && (
+          <button
+            onClick={handlePullWithWarning}
+            disabled={isPushing}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all bg-neon-cyan/10 hover:bg-neon-cyan/20 text-neon-cyan animate-pulse"
+            title={`New version (v${remoteVersion}) available`}
+          >
+            <RefreshCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">New changes</span>
+          </button>
+        )}
+
         <div className="w-px h-5 bg-border/30" />
 
         <Button
@@ -314,6 +354,55 @@ export default function Header() {
           <Github className="w-3.5 h-3.5" />
         </a>
       </div>
+
+      {/* Pull Warning Dialog */}
+      <Dialog open={showPullWarning} onOpenChange={setShowPullWarning}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCcw className="w-5 h-5 text-neon-cyan" />
+              Get Latest Changes?
+            </DialogTitle>
+            <DialogDescription>
+              Someone has updated this project. Would you like to get their
+              changes?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4 text-sm text-amber-200">
+            <p>
+              This will replace your current work with the latest version from
+              the cloud. You can undo this afterwards if needed.
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="dont-show-again"
+              checked={dontShowAgain}
+              onCheckedChange={(checked) => setDontShowAgain(checked === true)}
+            />
+            <label
+              htmlFor="dont-show-again"
+              className="text-sm text-muted-foreground cursor-pointer"
+            >
+              Don't show this warning again
+            </label>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setShowPullWarning(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handlePullNewChanges} disabled={isPushing}>
+              {isPushing ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              Get Latest Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Conflict Resolution Dialog */}
       <Dialog open={showConflict} onOpenChange={setShowConflict}>
