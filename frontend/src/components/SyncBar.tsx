@@ -6,31 +6,49 @@ import {
   Check,
   AlertCircle,
   Undo2,
+  Upload,
+  Download,
 } from "lucide-react";
 import { useProjectStore, type SyncStatus } from "@/store/projectStore";
 import { cn } from "@/lib/utils";
 
 export function SyncBar() {
   const syncStatus = useProjectStore((s) => s.syncStatus);
-  const syncToCloud = useProjectStore((s) => s.syncToCloud);
+  const pushToCloud = useProjectStore((s) => s.pushToCloud);
   const refreshFromCloud = useProjectStore((s) => s.refreshFromCloud);
   const undo = useProjectStore((s) => s.undo);
   const canUndo = useProjectStore((s) => s.canUndo);
   const [syncing, setSyncing] = useState(false);
+  const [showConflictActions, setShowConflictActions] = useState(false);
 
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await syncToCloud();
+      const result = await pushToCloud(false);
+      if (result.conflict) {
+        // Show conflict action buttons instead of just a toast
+        setShowConflictActions(true);
+      }
     } finally {
       setSyncing(false);
     }
   };
 
-  const handleRefresh = async () => {
+  const handleForceOverwrite = async () => {
+    setSyncing(true);
+    try {
+      await pushToCloud(true);
+      setShowConflictActions(false);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleFetchRemote = async () => {
     setSyncing(true);
     try {
       await refreshFromCloud();
+      setShowConflictActions(false);
     } finally {
       setSyncing(false);
     }
@@ -52,8 +70,8 @@ export function SyncBar() {
     },
     cloud_newer: {
       icon: <AlertCircle className="w-3.5 h-3.5" />,
-      label: "Cloud newer",
-      color: "text-sky-400",
+      label: "Conflict",
+      color: "text-rose-400",
     },
     no_cloud: {
       icon: <CloudOff className="w-3.5 h-3.5" />,
@@ -63,6 +81,44 @@ export function SyncBar() {
   };
 
   const config = statusConfig[syncStatus];
+
+  // Show conflict resolution buttons when there's a conflict
+  if (syncStatus === "cloud_newer" || showConflictActions) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className={cn("flex items-center gap-1.5 text-xs text-rose-400")}>
+          <AlertCircle className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Conflict</span>
+        </div>
+
+        <button
+          onClick={handleFetchRemote}
+          disabled={syncing}
+          className="flex items-center gap-1 rounded-md bg-sky-500/15 border border-sky-500/25 px-2 py-1 text-xs font-medium text-sky-400 hover:bg-sky-500/25 transition-colors disabled:opacity-50"
+        >
+          {syncing ? (
+            <RefreshCw className="w-3 h-3 animate-spin" />
+          ) : (
+            <Download className="w-3 h-3" />
+          )}
+          <span className="hidden sm:inline">Use Remote</span>
+        </button>
+
+        <button
+          onClick={handleForceOverwrite}
+          disabled={syncing}
+          className="flex items-center gap-1 rounded-md bg-rose-500/15 border border-rose-500/25 px-2 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/25 transition-colors disabled:opacity-50"
+        >
+          {syncing ? (
+            <RefreshCw className="w-3 h-3 animate-spin" />
+          ) : (
+            <Upload className="w-3 h-3" />
+          )}
+          <span className="hidden sm:inline">Overwrite</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -97,22 +153,6 @@ export function SyncBar() {
             <Cloud className="w-3 h-3" />
           )}
           <span className="hidden sm:inline">Save</span>
-        </button>
-      )}
-
-      {/* Refresh button for cloud_newer */}
-      {syncStatus === "cloud_newer" && (
-        <button
-          onClick={handleRefresh}
-          disabled={syncing}
-          className="flex items-center gap-1 rounded-md bg-sky-500/15 border border-sky-500/25 px-2 py-1 text-xs font-medium text-sky-400 hover:bg-sky-500/25 transition-colors disabled:opacity-50"
-        >
-          {syncing ? (
-            <RefreshCw className="w-3 h-3 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3 h-3" />
-          )}
-          <span className="hidden sm:inline">Fetch Remote</span>
         </button>
       )}
     </div>
