@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Cloud, CloudOff, RefreshCw, Check, AlertCircle } from "lucide-react";
+import {
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Check,
+  AlertCircle,
+  Undo2,
+} from "lucide-react";
 import { useProjectStore, type SyncStatus } from "@/store/projectStore";
 import { cn } from "@/lib/utils";
 
@@ -7,6 +14,8 @@ export function SyncBar() {
   const syncStatus = useProjectStore((s) => s.syncStatus);
   const syncToCloud = useProjectStore((s) => s.syncToCloud);
   const refreshFromCloud = useProjectStore((s) => s.refreshFromCloud);
+  const undo = useProjectStore((s) => s.undo);
+  const canUndo = useProjectStore((s) => s.canUndo);
   const [syncing, setSyncing] = useState(false);
 
   const handleSync = async () => {
@@ -63,6 +72,18 @@ export function SyncBar() {
         <span className="hidden sm:inline">{config.label}</span>
       </div>
 
+      {/* Undo button - shows when there's a previous state to restore */}
+      {canUndo && (
+        <button
+          onClick={undo}
+          className="flex items-center gap-1 rounded-md bg-violet-500/15 border border-violet-500/25 px-2 py-1 text-xs font-medium text-violet-400 hover:bg-violet-500/25 transition-colors"
+          title="Restore previous local state"
+        >
+          <Undo2 className="w-3 h-3" />
+          <span className="hidden sm:inline">Undo</span>
+        </button>
+      )}
+
       {/* Sync button */}
       {syncStatus === "local_changes" && (
         <button
@@ -91,7 +112,7 @@ export function SyncBar() {
           ) : (
             <RefreshCw className="w-3 h-3" />
           )}
-          <span className="hidden sm:inline">Pull</span>
+          <span className="hidden sm:inline">Fetch Remote</span>
         </button>
       )}
     </div>

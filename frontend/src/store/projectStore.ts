@@ -89,6 +89,7 @@ interface ProjectStore {
 
   // Undo
   undo: () => void;
+  canUndo: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -144,6 +145,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
   get projectName() {
     return get().project?.name ?? "Untitled Project";
+  },
+  get canUndo() {
+    return get().previousState !== null;
   },
 
   createProject: async (name: string) => {
@@ -412,7 +416,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         set({ isLoading: false });
         return false;
       }
+      // Save current local state so user can undo back to it
       set({
+        previousState: project,
         project: { ...data, items: buildFullItems(data.items) },
         cloudProject: data,
         syncStatus: "in_sync",

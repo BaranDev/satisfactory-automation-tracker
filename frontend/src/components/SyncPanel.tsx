@@ -182,29 +182,29 @@ export default function SyncPanel() {
               Version Conflict
             </DialogTitle>
             <DialogDescription>
-              The cloud version has been updated since your last sync. Do you
-              want to overwrite it with your local changes?
+              Someone else has updated the cloud version since your last sync.
+              Choose how to proceed:
             </DialogDescription>
           </DialogHeader>
 
           <div className="glass rounded-lg p-4 space-y-2 text-sm">
             <p>
-              <strong>Your version:</strong> v{project?.version}
+              <strong>Your local version:</strong> v{project?.version}
             </p>
             <p>
               <strong>Cloud version:</strong> v{cloudProject?.version}
             </p>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setShowConflict(false)}>
               Cancel
             </Button>
             <Button variant="outline" onClick={handlePull}>
-              Pull First
+              Use Remote Version
             </Button>
             <Button variant="destructive" onClick={() => handlePush(true)}>
-              Overwrite Cloud
+              Overwrite with My Changes
             </Button>
           </DialogFooter>
         </DialogContent>
