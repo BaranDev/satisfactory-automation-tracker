@@ -5,11 +5,6 @@ import {
   calcOutputPerMin,
 } from "@/lib/simulation";
 import * as api from "@/lib/api";
-import {
-  simulate as runSimulation,
-  calcOutputPerMin,
-} from "@/lib/simulation";
-import * as api from "@/lib/api";
 import type { ProjectData } from "@/lib/api";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -24,32 +19,7 @@ type ItemState = ProjectData["items"][string];
 
 interface DisplayBottleneck {
   itemKey: string;
-type ItemState = ProjectData["items"][string];
-
-interface DisplayBottleneck {
-  itemKey: string;
   label: string;
-  shortfall: number;
-  shortfallPercent: number;
-  neededMachines: number;
-}
-
-interface DisplaySuggestion {
-  itemKey: string;
-  message: string;
-}
-
-interface DisplayItemResult {
-  outputPerMin: number;
-  isBottleneck: boolean;
-  isSurplus: boolean;
-}
-
-export interface DisplaySimResult {
-  items: Record<string, DisplayItemResult>;
-  bottlenecks: DisplayBottleneck[];
-  suggestions: DisplaySuggestion[];
-  rawMaterials: Record<string, number>;
   shortfall: number;
   shortfallPercent: number;
   neededMachines: number;
@@ -123,13 +93,6 @@ interface ProjectStore {
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-/**
- * Merge cloud items into a full item map that includes every known game item.
- */
-function buildFullItems(
-  saved: Record<string, Partial<ItemState>> = {}
-): ProjectData["items"] {
-  const result: ProjectData["items"] = {};
 function buildFullItems(
   saved: Record<string, Partial<ItemState>> = {}
 ): ProjectData["items"] {
@@ -137,13 +100,7 @@ function buildFullItems(
 
   for (const [key, info] of Object.entries(ITEMS)) {
     const s = saved[key];
-    const s = saved[key];
     result[key] = {
-      label: s?.label ?? info.label,
-      icon: s?.icon ?? info.icon,
-      automated: s?.automated ?? false,
-      machines: s?.machines ?? 1,
-      overclock: s?.overclock ?? 1.0,
       label: s?.label ?? info.label,
       icon: s?.icon ?? info.icon,
       automated: s?.automated ?? false,
@@ -152,16 +109,9 @@ function buildFullItems(
     };
   }
 
-  // Include any items from cloud that aren't in our local DB
-  for (const [key, s] of Object.entries(saved)) {
   for (const [key, s] of Object.entries(saved)) {
     if (!result[key]) {
       result[key] = {
-        label: s.label ?? key,
-        icon: s.icon,
-        automated: s.automated ?? false,
-        machines: s.machines ?? 1,
-        overclock: s.overclock ?? 1.0,
         label: s.label ?? key,
         icon: s.icon,
         automated: s.automated ?? false,
@@ -177,7 +127,6 @@ function buildFullItems(
 // ─── Store Implementation ────────────────────────────────────
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
-  // Initial state
   project: null,
   cloudProject: null,
   isLoading: false,
@@ -187,7 +136,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   lastSyncedAt: null,
   previousState: null,
 
-  // Computed getters
   get items() {
     return get().project?.items ?? {};
   },
@@ -197,8 +145,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   get projectName() {
     return get().project?.name ?? "Untitled Project";
   },
-
-  // ─── Project Actions ─────────────────────────────────────
 
   createProject: async (name: string) => {
     set({ isLoading: true, error: null });
@@ -257,8 +203,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       syncStatus: "local_changes",
     });
   },
-
-  // ─── Item Actions ────────────────────────────────────────
 
   updateItem: (key: string, updates: Partial<ItemState>) => {
     const { project } = get();
@@ -361,8 +305,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
   },
 
-  // ─── Serialization ───────────────────────────────────────
-
   exportJson: () => {
     const { project } = get();
     return JSON.stringify(project, null, 2);
@@ -384,8 +326,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     }
   },
 
-  // ─── Simulation ──────────────────────────────────────────
-
   simulate: () => {
     const { project } = get();
     if (!project) return;
@@ -404,7 +344,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     const result = runSimulation(simInput);
 
-    // Convert to display format
     const displayItems: Record<string, DisplayItemResult> = {};
     for (const [key, node] of Object.entries(result.nodes)) {
       displayItems[key] = {
@@ -446,7 +385,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       })
     );
 
-    // Compute raw materials
     const rawMaterials: Record<string, number> = {};
     for (const [key, node] of Object.entries(result.nodes)) {
       if (node.isRawResource && node.demandRate > 0) {
@@ -463,8 +401,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       },
     });
   },
-
-  // ─── Cloud Sync ──────────────────────────────────────────
 
   pullFromCloud: async () => {
     const { project } = get();
@@ -496,7 +432,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (!project) return { success: false };
     set({ isLoading: true });
     try {
-      // Only push items that differ from defaults
       const pushItems: ProjectData["items"] = {};
       for (const [key, item] of Object.entries(project.items)) {
         if (item.automated || item.machines !== 1 || item.overclock !== 1.0) {
@@ -539,19 +474,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     await get().pullFromCloud();
   },
 
-  // ─── Undo ────────────────────────────────────────────────
-
   undo: () => {
     const prev = get().previousState;
     if (prev) {
       set({
-        project: prev,
         project: prev,
         previousState: null,
         syncStatus: "local_changes",
       });
     }
   },
-}));
-
 }));
