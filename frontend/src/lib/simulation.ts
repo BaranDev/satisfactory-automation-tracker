@@ -1,273 +1,248 @@
-import type { ProjectData, SimulationResult, ItemSimResult, Bottleneck, Suggestion, Recipe } from '@/types'
-import recipesData from '@/data/recipes.json'
+// Production simulation engine
+// Runs entirely client-side. Computes output/min for automated items,
+// detects bottlenecks, and generates improvement suggestions.
 
-const recipes: Recipe[] = recipesData.recipes
-const rawMaterials: Set<string> = new Set(recipesData.raw_materials)
-const machineData: Record<string, { power_mw: number }> = recipesData.machines
+import { RECIPES, ITEMS, getRecipeForItem, type Recipe } from "@/data/recipes";
 
-// Build lookup maps
-const recipeByOutput = new Map<string, Recipe>()
-recipes.forEach(recipe => {
-  recipe.outputs.forEach(output => {
-    recipeByOutput.set(output.item, recipe)
-  })
-})
+export interface SimulationInput {
+  automated: boolean;
+  machines: number;
+  overclock: number;
+}
 
-/**
- * Calculate output per minute for a single machine
- */
-function calculateOutputPerMachine(recipe: Recipe, overclock: number = 1.0): number {
-  const cyclesPerMinute = (60 / recipe.craft_time_sec) * overclock
-  const outputPerCycle = recipe.outputs[0]?.amount ?? 1
-  return cyclesPerMinute * outputPerCycle
+export interface NodeResult {
+  itemKey: string;
+  label: string;
+  recipe: Recipe | undefined;
+  supplyRate: number;     // items/min produced by assigned machines
+  demandRate: number;     // items/min required by downstream consumers
+  surplus: number;        // supply - demand (negative = bottleneck)
+  ratio: number;          // supply / demand (< 1 = bottleneck)
+  isBottleneck: boolean;
+  isRawResource: boolean;
+  machines: number;
+  overclock: number;
+}
+
+export interface Suggestion {
+  type: "add_machines" | "automate_upstream" | "increase_overclock";
+  itemKey: string;
+  label: string;
+  message: string;
+  impact: string;
+  priority: number; // higher = more urgent
+  extraMachines?: number;
+  targetOverclock?: number;
+}
+
+export interface SimulationResult {
+  nodes: Record<string, NodeResult>;
+  bottlenecks: NodeResult[];
+  suggestions: Suggestion[];
+  totalAutomated: number;
+  totalItems: number;
 }
 
 /**
- * Calculate input consumption per minute for a single machine
+ * Calculate output per minute for a single recipe+machine setup.
  */
-function calculateInputsPerMachine(recipe: Recipe, overclock: number = 1.0): Map<string, number> {
-  const cyclesPerMinute = (60 / recipe.craft_time_sec) * overclock
-  const inputs = new Map<string, number>()
-  
-  recipe.inputs.forEach(input => {
-    inputs.set(input.item, input.amount * cyclesPerMinute)
-  })
-  
-  return inputs
-}
-
-/**
- * Build dependency graph from automated items
- * @internal Reserved for future graph-based simulation
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _buildDependencyGraph(items: Record<string, { automated: boolean; machines: number; overclock: number }>): Map<string, Set<string>> {
-  const graph = new Map<string, Set<string>>() // item -> items it depends on
-  
-  Object.keys(items).forEach(itemKey => {
-    if (!items[itemKey].automated) return
-    
-    const recipe = recipeByOutput.get(itemKey)
-    if (!recipe) return
-    
-    const deps = new Set<string>()
-    recipe.inputs.forEach(input => {
-      if (!rawMaterials.has(input.item)) {
-        deps.add(input.item)
-      }
-    })
-    
-    graph.set(itemKey, deps)
-  })
-  
-  return graph
-}
-
-/**
- * Topological sort for dependency graph
- * @internal Reserved for future graph-based simulation
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _topologicalSort(graph: Map<string, Set<string>>): string[] {
-  const visited = new Set<string>()
-  const result: string[] = []
-  
-  function visit(node: string) {
-    if (visited.has(node)) return
-    visited.add(node)
-    
-    const deps = graph.get(node)
-    if (deps) {
-      deps.forEach(dep => visit(dep))
-    }
-    
-    result.push(node)
-  }
-  
-  graph.forEach((_, node) => visit(node))
-  
-  return result
-}
-
-/**
- * Run production simulation
- */
-export function runSimulation(project: ProjectData): SimulationResult {
-  const items = project.items
-  const itemResults: Record<string, ItemSimResult> = {}
-  const rawMaterialNeeds: Record<string, number> = {}
-  
-  // Calculate supply rates for all automated items
-  const supplyRates = new Map<string, number>()
-  
-  Object.entries(items).forEach(([itemKey, item]) => {
-    if (!item.automated) return
-    
-    const recipe = recipeByOutput.get(itemKey)
-    if (!recipe) return
-    
-    const outputPerMachine = calculateOutputPerMachine(recipe, item.overclock)
-    const totalOutput = outputPerMachine * item.machines
-    
-    supplyRates.set(itemKey, totalOutput)
-  })
-  
-  // Calculate demand rates (what consumers need)
-  const demandRates = new Map<string, number>()
-  
-  Object.entries(items).forEach(([itemKey, item]) => {
-    if (!item.automated) return
-    
-    const recipe = recipeByOutput.get(itemKey)
-    if (!recipe) return
-    
-    const inputsPerMachine = calculateInputsPerMachine(recipe, item.overclock)
-    
-    inputsPerMachine.forEach((amountPerMin, inputItem) => {
-      const totalDemand = amountPerMin * item.machines
-      
-      if (rawMaterials.has(inputItem)) {
-        rawMaterialNeeds[inputItem] = (rawMaterialNeeds[inputItem] || 0) + totalDemand
-      } else {
-        demandRates.set(inputItem, (demandRates.get(inputItem) || 0) + totalDemand)
-      }
-    })
-  })
-  
-  // Calculate results for each automated item
-  Object.entries(items).forEach(([itemKey, item]) => {
-    if (!item.automated) return
-    
-    const supply = supplyRates.get(itemKey) || 0
-    const demand = demandRates.get(itemKey) || 0
-    
-    const shortfall = Math.max(0, demand - supply)
-    const shortfallPercent = demand > 0 ? (shortfall / demand) * 100 : 0
-    
-    itemResults[itemKey] = {
-      outputPerMin: supply,
-      demandPerMin: demand,
-      supplyPerMin: supply,
-      isBottleneck: shortfall > 0,
-      isSurplus: supply > demand && demand > 0,
-      shortfall,
-      shortfallPercent, 
-    }
-  })
-  
-  // Find bottlenecks (top 3)
-  const bottlenecks: Bottleneck[] = Object.entries(itemResults)
-    .filter(([, result]) => result.isBottleneck)
-    .map(([itemKey, result]) => {
-      const recipe = recipeByOutput.get(itemKey)
-      const outputPerMachine = recipe 
-        ? calculateOutputPerMachine(recipe, items[itemKey]?.overclock || 1.0)
-        : 1
-      
-      return {
-        itemKey,
-        label: items[itemKey]?.label || itemKey,
-        shortfall: result.shortfall,
-        shortfallPercent: result.shortfallPercent,
-        neededMachines: Math.ceil(result.shortfall / outputPerMachine),
-      }
-    })
-    .sort((a, b) => b.shortfallPercent - a.shortfallPercent)
-    .slice(0, 3)
-  
-  // Generate suggestions
-  const suggestions: Suggestion[] = []
-  
-  // Suggestion: Add machines for bottlenecks
-  bottlenecks.forEach(bottleneck => {
-    const recipe = recipeByOutput.get(bottleneck.itemKey)
-    if (!recipe) return
-    
-    const outputPerMachine = calculateOutputPerMachine(recipe, items[bottleneck.itemKey]?.overclock || 1.0)
-    const machineName = getMachineName(recipe.machine_type)
-    
-    suggestions.push({
-      type: 'add_machines',
-      itemKey: bottleneck.itemKey,
-      label: bottleneck.label,
-      message: `Add ${bottleneck.neededMachines} ${machineName}(s) for ${bottleneck.label} (adds +${(outputPerMachine * bottleneck.neededMachines).toFixed(1)}/min)`,
-      machinesNeeded: bottleneck.neededMachines,
-      expectedGain: outputPerMachine * bottleneck.neededMachines,
-    })
-  })
-  
-  // Suggestion: Automate upstream items that have demand but aren't automated
-  demandRates.forEach((demand, itemKey) => {
-    if (!items[itemKey] || !items[itemKey].automated) {
-      const recipe = recipeByOutput.get(itemKey)
-      if (recipe) {
-        const outputPerMachine = calculateOutputPerMachine(recipe, 1.0)
-        const machinesNeeded = Math.ceil(demand / outputPerMachine)
-        
-        suggestions.push({
-          type: 'automate_upstream',
-          itemKey,
-          label: recipe.label,
-          message: `Automate ${recipe.label} upstream — current supply is manual, causing ${((demand / (demand + 0.001)) * 100).toFixed(0)}% demand gap. Need ~${machinesNeeded} ${getMachineName(recipe.machine_type)}(s).`,
-          machinesNeeded,
-        })
-      }
-    }
-  })
-  
-  return {
-    items: itemResults,
-    bottlenecks,
-    suggestions: suggestions.slice(0, 5), // Limit to 5 suggestions
-    rawMaterials: rawMaterialNeeds,
-  }
-}
-
-function getMachineName(machineType: string): string {
-  const names: Record<string, string> = {
-    smelter: 'Smelter',
-    constructor: 'Constructor',
-    assembler: 'Assembler',
-    manufacturer: 'Manufacturer',
-    foundry: 'Foundry',
-    refinery: 'Refinery',
-    packager: 'Packager',
-    blender: 'Blender',
-    particle_accelerator: 'Particle Accelerator',
-  }
-  return names[machineType] || machineType
-}
-
-/**
- * Get estimated power consumption for a configuration
- */
-export function estimatePower(
-  machineType: string, 
-  machineCount: number, 
-  overclock: number = 1.0
+export function calcOutputPerMin(
+  recipe: Recipe,
+  machines: number,
+  overclock: number,
+  outputIndex: number = 0
 ): number {
-  const basePower = machineData[machineType]?.power_mw || 0
-  // Power scales with overclock^1.6 (Satisfactory formula)
-  return basePower * machineCount * Math.pow(overclock, 1.6)
+  const cyclesPerMin = (60 / recipe.craft_time) * overclock;
+  const outputPerMachine = cyclesPerMin * recipe.outputs[outputIndex].amount;
+  return outputPerMachine * machines;
 }
 
 /**
- * Get all recipes
+ * Calculate input consumption per minute for a recipe+machine setup.
  */
-export function getRecipes(): Recipe[] {
-  return recipes
+export function calcInputPerMin(
+  recipe: Recipe,
+  machines: number,
+  overclock: number,
+  inputIndex: number
+): number {
+  const cyclesPerMin = (60 / recipe.craft_time) * overclock;
+  const inputPerMachine = cyclesPerMin * recipe.inputs[inputIndex].amount;
+  return inputPerMachine * machines;
 }
 
 /**
- * Check if an item is a raw material
+ * Run full production simulation on the given item states.
  */
-export function isRawMaterial(itemKey: string): boolean {
-  return rawMaterials.has(itemKey)
+export function simulate(
+  items: Record<string, SimulationInput>
+): SimulationResult {
+  const nodes: Record<string, NodeResult> = {};
+  const automatedKeys = Object.keys(items).filter((k) => items[k].automated);
+
+  // Step 1: Calculate supply rate for each automated item
+  for (const key of automatedKeys) {
+    const item = items[key];
+    const recipe = getRecipeForItem(key);
+    const info = ITEMS[key];
+    const isRaw = info?.category === "resource";
+
+    let supplyRate = 0;
+    if (recipe && !isRaw) {
+      supplyRate = calcOutputPerMin(recipe, item.machines, item.overclock);
+    } else if (isRaw) {
+      // Raw resources: assume infinite supply from miners
+      // Use machines * 60 as a rough "miner output" (Mk1 = 60/min, Mk2 = 120, Mk3 = 240)
+      supplyRate = item.machines * 60 * item.overclock;
+    }
+
+    nodes[key] = {
+      itemKey: key,
+      label: info?.label ?? key,
+      recipe,
+      supplyRate,
+      demandRate: 0,
+      surplus: 0,
+      ratio: 1,
+      isBottleneck: false,
+      isRawResource: isRaw,
+      machines: item.machines,
+      overclock: item.overclock,
+    };
+  }
+
+  // Step 2: Calculate demand rate for each item based on downstream consumers
+  for (const key of automatedKeys) {
+    const recipe = nodes[key]?.recipe;
+    if (!recipe) continue;
+
+    const item = items[key];
+    const cyclesPerMin = (60 / recipe.craft_time) * item.overclock;
+
+    for (const input of recipe.inputs) {
+      const inputDemand = cyclesPerMin * input.amount * item.machines;
+
+      if (nodes[input.item]) {
+        nodes[input.item].demandRate += inputDemand;
+      } else {
+        // Item is consumed but not automated — create a "missing" node
+        const inputInfo = ITEMS[input.item];
+        nodes[input.item] = {
+          itemKey: input.item,
+          label: inputInfo?.label ?? input.item,
+          recipe: getRecipeForItem(input.item),
+          supplyRate: 0,
+          demandRate: inputDemand,
+          surplus: 0,
+          ratio: 0,
+          isBottleneck: true,
+          isRawResource: inputInfo?.category === "resource",
+          machines: 0,
+          overclock: 1,
+        };
+      }
+    }
+  }
+
+  // Step 3: Calculate surplus and ratio
+  for (const node of Object.values(nodes)) {
+    if (node.demandRate > 0) {
+      node.surplus = node.supplyRate - node.demandRate;
+      node.ratio = node.supplyRate / node.demandRate;
+      node.isBottleneck = node.ratio < 0.99; // small tolerance
+    } else {
+      node.surplus = node.supplyRate;
+      node.ratio = Infinity;
+      node.isBottleneck = false;
+    }
+  }
+
+  // Step 4: Sort bottlenecks by severity
+  const bottlenecks = Object.values(nodes)
+    .filter((n) => n.isBottleneck)
+    .sort((a, b) => a.ratio - b.ratio);
+
+  // Step 5: Generate suggestions
+  const suggestions = generateSuggestions(nodes, items);
+
+  return {
+    nodes,
+    bottlenecks,
+    suggestions,
+    totalAutomated: automatedKeys.length,
+    totalItems: Object.keys(ITEMS).length,
+  };
 }
 
-/**
- * Get recipe for an item
- */
-export function getRecipeForItem(itemKey: string): Recipe | undefined {
-  return recipeByOutput.get(itemKey)
+function generateSuggestions(
+  nodes: Record<string, NodeResult>,
+  items: Record<string, SimulationInput>
+): Suggestion[] {
+  const suggestions: Suggestion[] = [];
+
+  for (const node of Object.values(nodes)) {
+    if (!node.isBottleneck) continue;
+
+    const shortfall = node.demandRate - node.supplyRate;
+    const pctShortfall = node.demandRate > 0
+      ? ((shortfall / node.demandRate) * 100).toFixed(0)
+      : "100";
+
+    if (node.machines === 0 && !node.isRawResource) {
+      // Not automated at all
+      const recipe = node.recipe;
+      if (recipe) {
+        const outputPerMachine = calcOutputPerMin(recipe, 1, 1.0);
+        const needed = Math.ceil(shortfall / outputPerMachine);
+        const machineType = recipe.machine.replace(/_/g, " ");
+
+        suggestions.push({
+          type: "automate_upstream",
+          itemKey: node.itemKey,
+          label: node.label,
+          message: `Automate ${node.label} upstream — current supply is manual, causing ${pctShortfall}% bottleneck.`,
+          impact: `Add ${needed} ${machineType}${needed > 1 ? "s" : ""} for +${(outputPerMachine * needed).toFixed(1)}/min`,
+          priority: shortfall,
+          extraMachines: needed,
+        });
+      }
+    } else if (node.supplyRate > 0) {
+      // Automated but insufficient
+      const recipe = node.recipe;
+      if (recipe) {
+        const outputPerMachine = calcOutputPerMin(recipe, 1, node.overclock);
+        const needed = Math.ceil(shortfall / outputPerMachine);
+        const machineType = recipe.machine.replace(/_/g, " ");
+
+        suggestions.push({
+          type: "add_machines",
+          itemKey: node.itemKey,
+          label: node.label,
+          message: `Add ${needed} ${machineType}${needed > 1 ? "s" : ""} for ${node.label} (adds +${(outputPerMachine * needed).toFixed(1)}/min).`,
+          impact: `Resolves ${pctShortfall}% shortfall`,
+          priority: shortfall,
+          extraMachines: needed,
+        });
+
+        // Also suggest overclock if adding 1-2 machines would suffice at higher OC
+        if (node.overclock < 2.5 && needed <= 2) {
+          const targetOC = Math.min(2.5, node.overclock * (node.demandRate / node.supplyRate));
+          const ocOutput = calcOutputPerMin(recipe, node.machines, targetOC);
+          if (ocOutput >= node.demandRate) {
+            suggestions.push({
+              type: "increase_overclock",
+              itemKey: node.itemKey,
+              label: node.label,
+              message: `Increase ${node.label} overclock to ${(targetOC * 100).toFixed(0)}% instead of adding machines.`,
+              impact: `Saves ${needed} machine${needed > 1 ? "s" : ""} but uses more power`,
+              priority: shortfall * 0.8, // slightly lower priority
+              targetOverclock: targetOC,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return suggestions.sort((a, b) => b.priority - a.priority);
 }

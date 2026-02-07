@@ -1,294 +1,213 @@
-import { create } from 'zustand'
-import type { ProjectData, SyncStatus, SimulationResult } from '@/types'
-import * as api from '@/lib/api'
-import { runSimulation } from '@/lib/simulation'
+import { create } from "zustand";
+import { ITEMS } from "@/data/recipes";
+import type { ProjectData } from "@/lib/api";
+
+export type SyncStatus = "in_sync" | "local_changes" | "cloud_newer" | "no_cloud";
+
+interface ItemState {
+  label: string;
+  icon?: string;
+  automated: boolean;
+  machines: number;
+  overclock: number;
+}
 
 interface ProjectStore {
-  // State
-  project: ProjectData | null
-  cloudProject: ProjectData | null
-  syncStatus: SyncStatus
-  lastSyncedAt: string | null
-  previousState: ProjectData | null
-  isLoading: boolean
-  error: string | null
-  simulationResult: SimulationResult | null
-  
+  // Project data
+  projectId: string | null;
+  projectName: string;
+  version: number;
+  lastUpdated: string | null;
+  assetsBaseUrl: string | null;
+  items: Record<string, ItemState>;
+
+  // Sync state
+  syncStatus: SyncStatus;
+  cloudVersion: number | null;
+  cloudLastUpdated: string | null;
+  lastSyncedAt: string | null;
+
+  // Undo (single step)
+  previousState: Record<string, ItemState> | null;
+
   // Actions
-  loadProject: (projectId: string) => Promise<boolean>
-  createProject: (name?: string) => Promise<ProjectData | null>
-  updateItem: (itemKey: string, updates: Partial<ProjectData['items'][string]>) => void
-  addItem: (itemKey: string, item: ProjectData['items'][string]) => void
-  removeItem: (itemKey: string) => void
-  setProjectName: (name: string) => void
-  
-  // Sync actions
-  pullFromCloud: () => Promise<boolean>
-  pushToCloud: (force?: boolean) => Promise<{ success: boolean; conflict?: boolean }>
-  
-  // Simulation
-  simulate: () => void
-  
-  // Undo
-  undo: () => void
-  
-  // Export/Import
-  exportJson: () => string
-  importJson: (json: string) => boolean
-  
-  // Helpers
-  updateSyncStatus: () => void
+  initFromCloud: (data: ProjectData) => void;
+  initNewProject: (projectId: string, name: string, assetsBaseUrl?: string) => void;
+  setItem: (key: string, updates: Partial<ItemState>) => void;
+  toggleAutomated: (key: string) => void;
+  setMachines: (key: string, machines: number) => void;
+  setOverclock: (key: string, overclock: number) => void;
+  markSynced: (version: number) => void;
+  markCloudNewer: (cloudVersion: number, cloudLastUpdated: string) => void;
+  undo: () => void;
+  loadFromJson: (data: ProjectData) => void;
+  toProjectData: () => ProjectData;
+  setProjectName: (name: string) => void;
+}
+
+/**
+ * Initialize items map with all known items from recipe database,
+ * merged with any saved state from cloud.
+ */
+function buildItemsMap(
+  savedItems: Record<string, Partial<ItemState>> = {}
+): Record<string, ItemState> {
+  const result: Record<string, ItemState> = {};
+
+  for (const [key, info] of Object.entries(ITEMS)) {
+    const saved = savedItems[key];
+    result[key] = {
+      label: saved?.label ?? info.label,
+      icon: saved?.icon ?? info.icon,
+      automated: saved?.automated ?? false,
+      machines: saved?.machines ?? 1,
+      overclock: saved?.overclock ?? 1.0,
+    };
+  }
+
+  // Include any items from cloud that aren't in our local DB
+  for (const [key, saved] of Object.entries(savedItems)) {
+    if (!result[key]) {
+      result[key] = {
+        label: saved.label ?? key,
+        icon: saved.icon,
+        automated: saved.automated ?? false,
+        machines: saved.machines ?? 1,
+        overclock: saved.overclock ?? 1.0,
+      };
+    }
+  }
+
+  return result;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
-  project: null,
-  cloudProject: null,
-  syncStatus: 'unknown',
+  projectId: null,
+  projectName: "New Project",
+  version: 0,
+  lastUpdated: null,
+  assetsBaseUrl: null,
+  items: buildItemsMap(),
+  syncStatus: "no_cloud",
+  cloudVersion: null,
+  cloudLastUpdated: null,
   lastSyncedAt: null,
   previousState: null,
-  isLoading: false,
-  error: null,
-  simulationResult: null,
-  
-  loadProject: async (projectId: string) => {
-    set({ isLoading: true, error: null })
-    
-    try {
-      const project = await api.getProject(projectId)
-      
-      if (project) {
-        set({
-          project,
-          cloudProject: JSON.parse(JSON.stringify(project)),
-          syncStatus: 'in_sync',
-          lastSyncedAt: new Date().toISOString(),
-          isLoading: false,
-        })
-        return true
-      } else {
-        set({ error: 'Project not found', isLoading: false })
-        return false
-      }
-    } catch (err) {
-      set({ error: 'Failed to load project', isLoading: false })
-      return false
-    }
-  },
-  
-  createProject: async (name?: string) => {
-    set({ isLoading: true, error: null })
-    
-    try {
-      const project = await api.createProject(name)
-      set({
-        project,
-        cloudProject: JSON.parse(JSON.stringify(project)),
-        syncStatus: 'in_sync',
-        lastSyncedAt: new Date().toISOString(),
-        isLoading: false,
-      })
-      return project
-    } catch (err) {
-      set({ error: 'Failed to create project', isLoading: false })
-      return null
-    }
-  },
-  
-  updateItem: (itemKey: string, updates: Partial<ProjectData['items'][string]>) => {
-    const { project } = get()
-    if (!project) return
-    
+
+  initFromCloud: (data) =>
     set({
-      previousState: JSON.parse(JSON.stringify(project)),
-      project: {
-        ...project,
-        items: {
-          ...project.items,
-          [itemKey]: {
-            ...project.items[itemKey],
-            ...updates,
-          },
-        },
-      },
-    })
-    
-    get().updateSyncStatus()
-  },
-  
-  addItem: (itemKey: string, item: ProjectData['items'][string]) => {
-    const { project } = get()
-    if (!project) return
-    
-    set({
-      previousState: JSON.parse(JSON.stringify(project)),
-      project: {
-        ...project,
-        items: {
-          ...project.items,
-          [itemKey]: item,
-        },
-      },
-    })
-    
-    get().updateSyncStatus()
-  },
-  
-  removeItem: (itemKey: string) => {
-    const { project } = get()
-    if (!project) return
-    
-    const newItems = { ...project.items }
-    delete newItems[itemKey]
-    
-    set({
-      previousState: JSON.parse(JSON.stringify(project)),
-      project: {
-        ...project,
-        items: newItems,
-      },
-    })
-    
-    get().updateSyncStatus()
-  },
-  
-  setProjectName: (name: string) => {
-    const { project } = get()
-    if (!project) return
-    
-    set({
-      previousState: JSON.parse(JSON.stringify(project)),
-      project: {
-        ...project,
-        name,
-      },
-    })
-    
-    get().updateSyncStatus()
-  },
-  
-  pullFromCloud: async () => {
-    const { project } = get()
-    if (!project) return false
-    
-    set({ isLoading: true })
-    
-    try {
-      const cloudProject = await api.getProject(project.project_id)
-      
-      if (cloudProject) {
-        set({
-          project: cloudProject,
-          cloudProject: JSON.parse(JSON.stringify(cloudProject)),
-          syncStatus: 'in_sync',
-          lastSyncedAt: new Date().toISOString(),
-          isLoading: false,
-        })
-        return true
-      }
-      
-      set({ isLoading: false })
-      return false
-    } catch (err) {
-      set({ error: 'Failed to pull from cloud', isLoading: false })
-      return false
-    }
-  },
-  
-  pushToCloud: async (force = false) => {
-    const { project, cloudProject } = get()
-    if (!project) return { success: false }
-    
-    set({ isLoading: true })
-    
-    try {
-      const result = await api.updateProject(
-        project.project_id,
-        project,
-        { force, expectedVersion: cloudProject?.version }
-      )
-      
-      set({
-        project: result.project,
-        cloudProject: JSON.parse(JSON.stringify(result.project)),
-        syncStatus: 'in_sync',
-        lastSyncedAt: new Date().toISOString(),
-        isLoading: false,
-      })
-      
-      return { success: true }
-    } catch (err: unknown) {
-      if ((err as { type?: string }).type === 'conflict') {
-        set({ isLoading: false })
-        return { success: false, conflict: true }
-      }
-      
-      set({ error: 'Failed to push to cloud', isLoading: false })
-      return { success: false }
-    }
-  },
-  
-  simulate: () => {
-    const { project } = get()
-    if (!project) return
-    
-    const result = runSimulation(project)
-    set({ simulationResult: result })
-  },
-  
-  undo: () => {
-    const { previousState } = get()
-    if (!previousState) return
-    
-    set({
-      project: previousState,
+      projectId: data.project_id,
+      projectName: data.name,
+      version: data.version,
+      lastUpdated: data.last_updated,
+      assetsBaseUrl: data.assets_base_url ?? null,
+      items: buildItemsMap(data.items),
+      syncStatus: "in_sync",
+      cloudVersion: data.version,
+      cloudLastUpdated: data.last_updated,
+      lastSyncedAt: new Date().toISOString(),
       previousState: null,
-    })
-    
-    get().updateSyncStatus()
+    }),
+
+  initNewProject: (projectId, name, assetsBaseUrl) =>
+    set({
+      projectId,
+      projectName: name,
+      version: 1,
+      lastUpdated: new Date().toISOString(),
+      assetsBaseUrl: assetsBaseUrl ?? null,
+      items: buildItemsMap(),
+      syncStatus: "in_sync",
+      cloudVersion: 1,
+      cloudLastUpdated: new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+      previousState: null,
+    }),
+
+  setItem: (key, updates) => {
+    const current = get().items;
+    set({
+      previousState: { ...current },
+      items: {
+        ...current,
+        [key]: { ...current[key], ...updates },
+      },
+      syncStatus: "local_changes",
+      lastUpdated: new Date().toISOString(),
+    });
   },
-  
-  exportJson: () => {
-    const { project } = get()
-    if (!project) return '{}'
-    return JSON.stringify(project, null, 2)
+
+  toggleAutomated: (key) => {
+    const item = get().items[key];
+    if (item) get().setItem(key, { automated: !item.automated });
   },
-  
-  importJson: (json: string) => {
-    try {
-      const data = JSON.parse(json)
-      
-      // Basic validation
-      if (!data.project_id || !data.items) {
-        return false
-      }
-      
+
+  setMachines: (key, machines) => {
+    get().setItem(key, { machines: Math.max(0, machines) });
+  },
+
+  setOverclock: (key, overclock) => {
+    get().setItem(key, { overclock: Math.max(0.01, Math.min(2.5, overclock)) });
+  },
+
+  markSynced: (version) =>
+    set({
+      syncStatus: "in_sync",
+      version,
+      cloudVersion: version,
+      cloudLastUpdated: new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+    }),
+
+  markCloudNewer: (cloudVersion, cloudLastUpdated) =>
+    set({
+      syncStatus: "cloud_newer",
+      cloudVersion,
+      cloudLastUpdated,
+    }),
+
+  undo: () => {
+    const prev = get().previousState;
+    if (prev) {
       set({
-        previousState: get().project ? JSON.parse(JSON.stringify(get().project)) : null,
-        project: data,
-      })
-      
-      get().updateSyncStatus()
-      return true
-    } catch {
-      return false
+        items: prev,
+        previousState: null,
+        syncStatus: "local_changes",
+      });
     }
   },
-  
-  updateSyncStatus: () => {
-    const { project, cloudProject } = get()
-    
-    if (!project || !cloudProject) {
-      set({ syncStatus: 'unknown' })
-      return
+
+  loadFromJson: (data) =>
+    set({
+      projectId: data.project_id,
+      projectName: data.name,
+      version: data.version,
+      lastUpdated: data.last_updated,
+      assetsBaseUrl: data.assets_base_url ?? null,
+      items: buildItemsMap(data.items),
+      syncStatus: "local_changes",
+      previousState: get().items,
+    }),
+
+  toProjectData: (): ProjectData => {
+    const state = get();
+    // Only include items that have been modified from defaults
+    const items: Record<string, ItemState> = {};
+    for (const [key, item] of Object.entries(state.items)) {
+      if (item.automated || item.machines !== 1 || item.overclock !== 1.0) {
+        items[key] = item;
+      }
     }
-    
-    const localJson = JSON.stringify(project.items)
-    const cloudJson = JSON.stringify(cloudProject.items)
-    
-    if (localJson !== cloudJson || project.name !== cloudProject.name) {
-      set({ syncStatus: 'local_changes' })
-    } else {
-      set({ syncStatus: 'in_sync' })
-    }
+    return {
+      project_id: state.projectId ?? "",
+      name: state.projectName,
+      version: state.version,
+      last_updated: state.lastUpdated ?? new Date().toISOString(),
+      assets_base_url: state.assetsBaseUrl ?? undefined,
+      items,
+    };
   },
-}))
+
+  setProjectName: (name) =>
+    set({ projectName: name, syncStatus: "local_changes" }),
+}));

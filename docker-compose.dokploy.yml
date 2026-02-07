@@ -1,16 +1,19 @@
 # docker-compose.dokploy.yml
+# For deployment via Dokploy. No ports exposed - Traefik handles routing via domain labels.
+# RustFS runs as a separate Dokploy service.
+
 services:
   backend:
     build: ./backend
     restart: unless-stopped
     environment:
-      S3_ENDPOINT: https://s3.cevdetbaran.com
-      S3_ACCESS_KEY: rustfsadmin
-      S3_SECRET_KEY: fwpoimghzqbbo6yo
-      S3_BUCKET: satisfactory-tracker
-      ASSETS_BUCKET: satisfactory-assets
-      ASSETS_BASE_URL: https://s3.cevdetbaran.com/satisfactory-assets
-      CORS_ORIGINS: https://sap.cevdetbaran.com
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.cevdetbaran.com}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-rustfsadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-changeme}
+      S3_BUCKET: ${S3_BUCKET:-satisfactory-tracker}
+      ASSETS_BUCKET: ${ASSETS_BUCKET:-satisfactory-assets}
+      ASSETS_BASE_URL: ${ASSETS_BASE_URL:-https://s3.cevdetbaran.com/satisfactory-assets}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://sap.cevdetbaran.com}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
