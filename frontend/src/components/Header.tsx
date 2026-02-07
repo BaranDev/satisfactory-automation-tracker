@@ -12,6 +12,7 @@ import {
   CloudOff,
   Loader2,
   Github,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,12 +32,14 @@ import { cn } from "@/lib/utils";
 export default function Header() {
   const {
     project,
+    cloudProject,
     setProjectName,
     exportJson,
     importJson,
     syncStatus,
     isLoading,
     pushToCloud,
+    pullFromCloud,
   } = useProjectStore();
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
@@ -45,6 +48,7 @@ export default function Header() {
   const [importOpen, setImportOpen] = useState(false);
   const [importData, setImportData] = useState("");
   const [isPushing, setIsPushing] = useState(false);
+  const [showConflict, setShowConflict] = useState(false);
 
   if (!project) return null;
 
@@ -102,10 +106,27 @@ export default function Header() {
     if (result.success) {
       toast({ title: "Synced", description: "Factory saved to cloud" });
     } else if (result.conflict) {
+      setShowConflict(true);
+    }
+  };
+
+  const handlePull = async () => {
+    setIsPushing(true);
+    await pullFromCloud();
+    setIsPushing(false);
+    setShowConflict(false);
+    toast({ title: "Updated", description: "Loaded remote version" });
+  };
+
+  const handleForceSync = async () => {
+    setIsPushing(true);
+    const result = await pushToCloud(true);
+    setIsPushing(false);
+    setShowConflict(false);
+    if (result.success) {
       toast({
-        title: "Conflict detected",
-        description: "Cloud has newer changes",
-        variant: "destructive",
+        title: "Overwritten",
+        description: "Your changes saved to cloud",
       });
     }
   };
@@ -251,7 +272,11 @@ export default function Header() {
 
         <Dialog open={importOpen} onOpenChange={setImportOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" variant="ghost" className="gap-1.5 h-7 px-2 text-xs">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="gap-1.5 h-7 px-2 text-xs"
+            >
               <Upload className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Import</span>
             </Button>
@@ -289,6 +314,53 @@ export default function Header() {
           <Github className="w-3.5 h-3.5" />
         </a>
       </div>
+
+      {/* Conflict Resolution Dialog */}
+      <Dialog open={showConflict} onOpenChange={setShowConflict}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-yellow-500" />
+              Version Conflict
+            </DialogTitle>
+            <DialogDescription>
+              Someone else has updated the cloud version since your last sync.
+              Choose how to proceed:
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg bg-secondary/50 p-4 space-y-2 text-sm">
+            <p>
+              <strong>Your local version:</strong> v{project?.version}
+            </p>
+            <p>
+              <strong>Cloud version:</strong> v{cloudProject?.version}
+            </p>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setShowConflict(false)}>
+              Cancel
+            </Button>
+            <Button variant="outline" onClick={handlePull} disabled={isPushing}>
+              {isPushing ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              Use Remote Version
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleForceSync}
+              disabled={isPushing}
+            >
+              {isPushing ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              Overwrite with My Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }
