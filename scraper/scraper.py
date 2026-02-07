@@ -230,6 +230,38 @@ ITEMS = {
     "medicinal_inhaler": "Medicinal_Inhaler",
 }
 
+# ──────────────────────────────────────────────
+# Machine list for factory builder images
+# Key: machine type key (matches frontend MACHINES dict)
+# Value: wiki page path (after /wiki/)
+# ──────────────────────────────────────────────
+
+MACHINES = {
+    "smelter": "Smelter",
+    "foundry": "Foundry",
+    "constructor": "Constructor",
+    "assembler": "Assembler",
+    "manufacturer": "Manufacturer",
+    "packager": "Packager",
+    "refinery": "Refinery",
+    "blender": "Blender",
+    "particle_accelerator": "Particle_Accelerator",
+    "quantum_encoder": "Quantum_Encoder",
+    "converter": "Converter",
+    "miner_mk1": "Miner",
+    "miner_mk2": "Miner",
+    "miner_mk3": "Miner",
+    "oil_extractor": "Oil_Extractor",
+    "water_extractor": "Water_Extractor",
+    "resource_well_pressurizer": "Resource_Well_Pressurizer",
+    "coal_generator": "Coal-Powered_Generator",
+    "fuel_generator": "Fuel-Powered_Generator",
+    "nuclear_power_plant": "Nuclear_Power_Plant",
+    "biomass_burner": "Biomass_Burner",
+    "geothermal_generator": "Geothermal_Generator",
+    "alien_power_augmenter": "Alien_Power_Augmenter",
+}
+
 
 # ──────────────────────────────────────────────
 # S3 / RustFS Client
@@ -510,6 +542,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Don't actually upload to S3")
     parser.add_argument("--skip-existing", action="store_true", help="Skip items already in S3")
     parser.add_argument("--discover", action="store_true", help="Also discover items from wiki (slower)")
+    parser.add_argument("--machines", action="store_true", help="Scrape machine images instead of items")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -531,6 +564,10 @@ def main():
         key = _sanitize_key(args.item)
         items = {key: args.item}
         print(f"TEST MODE: Scraping '{args.item}' only")
+    elif args.machines:
+        # Machine images mode - prefix keys with "machine_" for S3
+        items = {f"machine_{k}": v for k, v in MACHINES.items()}
+        print(f"Scraping {len(items)} machine images")
     else:
         items = dict(ITEMS)
         if args.discover:
