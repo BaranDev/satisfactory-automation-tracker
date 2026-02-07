@@ -4,40 +4,45 @@
 
 @layer base {
   :root {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
+    --background: 225 25% 5%;
+    --foreground: 210 40% 96%;
 
-    --card: 222 47% 8%;
-    --card-foreground: 210 40% 98%;
+    --card: 225 20% 8%;
+    --card-foreground: 210 40% 96%;
 
-    --popover: 222 47% 8%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 225 20% 8%;
+    --popover-foreground: 210 40% 96%;
 
-    --primary: 174 100% 50%;
-    --primary-foreground: 222 47% 6%;
+    --primary: 32 95% 52%;
+    --primary-foreground: 225 25% 5%;
 
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 220 20% 14%;
+    --secondary-foreground: 210 40% 96%;
 
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 220 20% 14%;
+    --muted-foreground: 215 15% 55%;
 
-    --accent: 280 100% 60%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 186 100% 50%;
+    --accent-foreground: 225 25% 5%;
 
-    --destructive: 0 84% 60%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 174 100% 50%;
+    --border: 220 15% 16%;
+    --input: 220 15% 16%;
+    --ring: 32 95% 52%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    --neon-cyan: #00f5ff;
-    --neon-pink: #ff00ff;
+    --ficsit-orange: #e8830c;
+    --ficsit-amber: #f59e0b;
+    --ficsit-dark: #0a0e17;
+    --ficsit-surface: #111827;
+    --ficsit-blue: #1e3a5f;
+    --neon-cyan: #00d4ff;
     --neon-green: #00ff88;
     --neon-orange: #ff8800;
+    --neon-red: #ff3344;
   }
 }
 
@@ -47,173 +52,188 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter", "Outfit", sans-serif;
+    font-family: "Inter", "Outfit", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Glass morphism utility */
+/* ── Grid Background ─────────────────────────────────────────── */
+.hex-grid-bg {
+  background-image:
+    linear-gradient(rgba(232, 131, 12, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 131, 12, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Glass Morphism ──────────────────────────────────────────── */
 .glass {
-  @apply bg-card/70 backdrop-blur-md border border-white/10;
+  @apply bg-card/60 backdrop-blur-md;
+  border: 1px solid rgba(232, 131, 12, 0.08);
 }
 
 .glass-strong {
-  @apply bg-card/90 backdrop-blur-xl border border-white/20;
+  @apply bg-card/85 backdrop-blur-xl;
+  border: 1px solid rgba(232, 131, 12, 0.12);
 }
 
-/* Neon glow utilities */
-.neon-cyan {
-  --neon-color: var(--neon-cyan);
+.glass-panel {
+  @apply bg-card/70 backdrop-blur-lg;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Glow Effects ────────────────────────────────────────────── */
+.glow-orange {
   box-shadow:
-    0 0 10px var(--neon-cyan),
-    0 0 20px rgba(0, 245, 255, 0.3);
+    0 0 8px rgba(232, 131, 12, 0.4),
+    0 0 24px rgba(232, 131, 12, 0.15);
 }
 
-.neon-pink {
-  --neon-color: var(--neon-pink);
+.glow-cyan {
   box-shadow:
-    0 0 10px var(--neon-pink),
-    0 0 20px rgba(255, 0, 255, 0.3);
+    0 0 8px rgba(0, 212, 255, 0.4),
+    0 0 24px rgba(0, 212, 255, 0.15);
 }
 
-.neon-green {
-  --neon-color: var(--neon-green);
+.glow-green {
   box-shadow:
-    0 0 10px var(--neon-green),
-    0 0 20px rgba(0, 255, 136, 0.3);
+    0 0 8px rgba(0, 255, 136, 0.4),
+    0 0 24px rgba(0, 255, 136, 0.15);
 }
 
-.neon-orange {
-  --neon-color: var(--neon-orange);
+.glow-red {
   box-shadow:
-    0 0 10px var(--neon-orange),
-    0 0 20px rgba(255, 136, 0, 0.3);
+    0 0 8px rgba(255, 51, 68, 0.4),
+    0 0 24px rgba(255, 51, 68, 0.15);
 }
 
-/* Neon text glow */
+/* ── Text Glow ───────────────────────────────────────────────── */
+.text-glow-orange {
+  text-shadow:
+    0 0 10px rgba(232, 131, 12, 0.6),
+    0 0 30px rgba(232, 131, 12, 0.3);
+}
+
 .text-glow-cyan {
   text-shadow:
-    0 0 10px var(--neon-cyan),
-    0 0 20px var(--neon-cyan);
+    0 0 10px rgba(0, 212, 255, 0.6),
+    0 0 30px rgba(0, 212, 255, 0.3);
 }
 
-.text-glow-pink {
-  text-shadow:
-    0 0 10px var(--neon-pink),
-    0 0 20px var(--neon-pink);
-}
-
-.text-glow-green {
-  text-shadow:
-    0 0 10px var(--neon-green),
-    0 0 20px var(--neon-green);
-}
-
-/* Animated border gradient */
-.border-gradient {
+/* ── Animated Border ─────────────────────────────────────────── */
+.border-glow {
   position: relative;
 }
 
-.border-gradient::before {
+.border-glow::before {
   content: "";
   position: absolute;
-  inset: -2px;
+  inset: -1px;
   background: linear-gradient(
-    45deg,
-    var(--neon-cyan),
-    var(--neon-pink),
-    var(--neon-cyan)
+    135deg,
+    rgba(232, 131, 12, 0.3),
+    rgba(0, 212, 255, 0.1),
+    rgba(232, 131, 12, 0.3)
   );
-  background-size: 200% 200%;
   border-radius: inherit;
   z-index: -1;
-  animation: gradient-rotate 3s linear infinite;
+  animation: border-pulse 4s ease-in-out infinite;
 }
 
-@keyframes gradient-rotate {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+@keyframes border-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
-/* React Flow customization */
-.react-flow__node {
-  @apply glass rounded-lg;
+/* ── Scanline Effect (subtle) ────────────────────────────────── */
+.scanline-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
 }
 
-.react-flow__edge-path {
-  stroke: var(--neon-cyan);
-  stroke-width: 2;
-}
-
-.react-flow__background {
-  background-color: hsl(222, 47%, 4%);
-}
-
-/* Scrollbar styling */
+/* ── Scrollbar ───────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-background;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-muted rounded-full;
+  @apply rounded-full;
+  background: rgba(232, 131, 12, 0.2);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-muted-foreground;
+  background: rgba(232, 131, 12, 0.4);
 }
 
-/* Animation for number counters */
-.number-animate {
-  transition: all 0.3s ease-out;
-}
-
-/* Bottleneck pulse animation */
+/* ── Animations ──────────────────────────────────────────────── */
 .bottleneck {
   animation: bottleneck-pulse 2s ease-in-out infinite;
 }
 
 @keyframes bottleneck-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 10px rgba(239, 68, 68, 0.5),
-      0 0 20px rgba(239, 68, 68, 0.3);
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 51, 68, 0.4), 0 0 20px rgba(255, 51, 68, 0.2);
   }
   50% {
-    box-shadow:
-      0 0 20px rgba(239, 68, 68, 0.8),
-      0 0 40px rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 20px rgba(255, 51, 68, 0.6), 0 0 40px rgba(255, 51, 68, 0.3);
   }
 }
 
-/* Healthy node glow */
 .healthy {
-  animation: healthy-glow 2s ease-in-out infinite;
+  animation: healthy-glow 3s ease-in-out infinite;
 }
 
 @keyframes healthy-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 0 10px rgba(0, 255, 136, 0.5),
-      0 0 20px rgba(0, 255, 136, 0.3);
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.3), 0 0 16px rgba(0, 255, 136, 0.15);
   }
   50% {
-    box-shadow:
-      0 0 15px rgba(0, 255, 136, 0.7),
-      0 0 30px rgba(0, 255, 136, 0.4);
+    box-shadow: 0 0 12px rgba(0, 255, 136, 0.5), 0 0 24px rgba(0, 255, 136, 0.25);
   }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* ── Drop Zone ───────────────────────────────────────────────── */
+.drop-zone-active {
+  background: rgba(232, 131, 12, 0.05);
+  border-color: rgba(232, 131, 12, 0.4) !important;
+  box-shadow: inset 0 0 40px rgba(232, 131, 12, 0.08);
+}
+
+/* ── Number Animation ────────────────────────────────────────── */
+.number-animate {
+  transition: all 0.3s ease-out;
+}
+
+/* ── Draggable Item ──────────────────────────────────────────── */
+.draggable-item {
+  cursor: grab;
+}
+
+.draggable-item:active {
+  cursor: grabbing;
 }

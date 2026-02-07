@@ -1,5 +1,12 @@
 import { useState, useMemo, useCallback } from "react";
-import { Search, ChevronDown, ChevronUp, Check, Minus } from "lucide-react";
+import {
+  Search,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Minus,
+  GripVertical,
+} from "lucide-react";
 import { ITEMS, type ItemInfo } from "@/data/recipes";
 import { useProjectStore } from "@/store/projectStore";
 import { ItemImage } from "@/components/ItemImage";
@@ -82,7 +89,6 @@ export default function ItemGrid() {
 
   const items = project?.items ?? {};
 
-  // Group items by category
   const groupedItems = useMemo(() => {
     const groups: Record<string, (ItemInfo & { key: string })[]> = {};
     for (const [key, info] of Object.entries(ITEMS)) {
@@ -90,14 +96,12 @@ export default function ItemGrid() {
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push({ ...info, key });
     }
-    // Sort each group by tier then label
     for (const arr of Object.values(groups)) {
       arr.sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
     }
     return groups;
   }, []);
 
-  // Filter by search + automation toggle
   const filterItems = useCallback(
     (categoryItems: (ItemInfo & { key: string })[]) => {
       return categoryItems.filter((info) => {
@@ -113,7 +117,6 @@ export default function ItemGrid() {
     [search, showOnlyAutomated, items],
   );
 
-  // Count automated per category for tab badges
   const automatedCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
     for (const [key, item] of Object.entries(items)) {
@@ -126,7 +129,6 @@ export default function ItemGrid() {
     return counts;
   }, [items]);
 
-  // "All" tab items
   const allItems = useMemo(() => {
     return Object.entries(ITEMS)
       .map(([key, info]) => ({ ...info, key }))
@@ -135,37 +137,48 @@ export default function ItemGrid() {
 
   if (!project) {
     return (
-      <div className="text-center py-12 text-zinc-500">No project loaded</div>
+      <div className="text-center py-12 text-muted-foreground text-sm">
+        No project loaded
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+          Item Catalog
+        </h2>
+        <span className="text-[10px] text-muted-foreground/60">
+          Drag to factory floor
+        </span>
+      </div>
+
       {/* Search + Filter Bar */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search items..."
-            className="w-full rounded-lg bg-zinc-800/80 border border-zinc-700/50 pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-orange-500/50 focus:border-orange-500/50 transition-colors"
+            className="w-full rounded-md bg-background/60 border border-border/40 pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors"
           />
         </div>
         <button
           onClick={() => setShowOnlyAutomated(!showOnlyAutomated)}
           className={cn(
-            "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+            "flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-all shrink-0",
             showOnlyAutomated
-              ? "bg-orange-500/15 border-orange-500/40 text-orange-400"
-              : "bg-zinc-800/60 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600",
+              ? "bg-primary/10 border-primary/30 text-primary"
+              : "bg-background/40 border-border/40 text-muted-foreground hover:text-foreground hover:border-border/60",
           )}
         >
-          <Check className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Automated only</span>
+          <Check className="w-3 h-3" />
           {automatedCounts.all > 0 && (
-            <span className="tabular-nums text-xs opacity-70">
+            <span className="tabular-nums text-[10px] opacity-70">
               {automatedCounts.all}
             </span>
           )}
@@ -202,8 +215,7 @@ export default function ItemGrid() {
             ))}
         </TabsList>
 
-        {/* All Items Tab */}
-        <TabsContent value="all" className="mt-4">
+        <TabsContent value="all" className="mt-3">
           <ItemList
             items={filterItems(allItems)}
             storeItems={items}
@@ -215,11 +227,10 @@ export default function ItemGrid() {
           />
         </TabsContent>
 
-        {/* Per-category Tabs */}
         {Object.entries(CATEGORIES)
           .filter(([k]) => k !== "all" && groupedItems[k]?.length)
           .map(([catKey]) => (
-            <TabsContent key={catKey} value={catKey} className="mt-4">
+            <TabsContent key={catKey} value={catKey} className="mt-3">
               <ItemList
                 items={filterItems(groupedItems[catKey] ?? [])}
                 storeItems={items}
@@ -236,7 +247,7 @@ export default function ItemGrid() {
   );
 }
 
-// ─── Item List (grid) ────────────────────────────────────────
+// ─── Item List ────────────────────────────────────────────────
 
 interface ItemListProps {
   items: (ItemInfo & { key: string })[];
@@ -268,14 +279,14 @@ function ItemList({
 }: ItemListProps) {
   if (itemList.length === 0) {
     return (
-      <div className="text-center py-12 text-zinc-500 text-sm">
+      <div className="text-center py-8 text-muted-foreground text-xs">
         No items found.
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+    <div className="space-y-1">
       {itemList.map((info) => {
         const state = storeItems[info.key];
         const isExpanded = expandedItem === info.key;
@@ -284,35 +295,43 @@ function ItemList({
         return (
           <div
             key={info.key}
+            draggable={!isAutomated}
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", info.key);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
             className={cn(
-              "group rounded-lg border transition-all duration-150",
+              "group rounded-md border transition-all duration-150",
               isAutomated
-                ? "bg-orange-500/5 border-orange-500/25"
-                : "bg-zinc-800/40 border-zinc-700/30 hover:border-zinc-600/50",
+                ? "bg-primary/5 border-primary/20"
+                : "bg-background/30 border-border/20 hover:border-border/40 draggable-item",
             )}
           >
             {/* Item Row */}
             <div
-              className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer select-none"
               onClick={() => setExpandedItem(isExpanded ? null : info.key)}
             >
+              {!isAutomated && (
+                <GripVertical className="w-3 h-3 text-muted-foreground/20 group-hover:text-muted-foreground/50 transition-colors shrink-0" />
+              )}
               <ItemImage
                 icon={info.icon}
                 label={info.label}
                 category={info.category}
-                size="md"
+                size="sm"
               />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-zinc-200 truncate">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-foreground truncate">
                     {info.label}
                   </span>
                   {isAutomated && (
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-orange-400" />
+                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-primary" />
                   )}
                 </div>
                 {isAutomated && state && (
-                  <span className="text-[11px] text-zinc-500 tabular-nums">
+                  <span className="text-[10px] text-muted-foreground tabular-nums">
                     {state.machines}x @ {Math.round(state.overclock * 100)}%
                   </span>
                 )}
@@ -323,42 +342,44 @@ function ItemList({
                   toggleAutomated(info.key);
                 }}
                 className={cn(
-                  "shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-all",
+                  "shrink-0 w-6 h-6 rounded flex items-center justify-center transition-all",
                   isAutomated
-                    ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30"
-                    : "bg-zinc-700/40 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/60",
+                    ? "bg-primary/15 text-primary hover:bg-primary/25"
+                    : "bg-secondary/40 text-muted-foreground/50 hover:text-foreground hover:bg-secondary/60",
                 )}
                 title={
-                  isAutomated ? "Mark as not automated" : "Mark as automated"
+                  isAutomated ? "Remove from production" : "Add to production"
                 }
               >
                 {isAutomated ? (
-                  <Check className="w-3.5 h-3.5" />
+                  <Check className="w-3 h-3" />
                 ) : (
-                  <Minus className="w-3.5 h-3.5" />
+                  <Minus className="w-3 h-3" />
                 )}
               </button>
-              <div className="shrink-0 text-zinc-600">
+              <div className="shrink-0 text-muted-foreground/30">
                 {isExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
+                  <ChevronUp className="w-3.5 h-3.5" />
                 ) : (
-                  <ChevronDown className="w-4 h-4" />
+                  <ChevronDown className="w-3.5 h-3.5" />
                 )}
               </div>
             </div>
 
             {/* Expanded Controls */}
             {isExpanded && (
-              <div className="px-3 pb-3 pt-1 border-t border-zinc-700/30 space-y-3">
+              <div className="px-2 pb-2 pt-1 border-t border-border/20 space-y-2">
                 {/* Machines */}
                 <div className="flex items-center justify-between">
-                  <label className="text-xs text-zinc-400">Machines</label>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Machines
+                  </label>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() =>
                         setMachines(info.key, (state?.machines ?? 1) - 1)
                       }
-                      className="w-6 h-6 rounded bg-zinc-700/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center text-sm transition-colors"
+                      className="w-5 h-5 rounded bg-secondary/50 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs transition-colors"
                     >
                       -
                     </button>
@@ -369,13 +390,13 @@ function ItemList({
                       onChange={(e) =>
                         setMachines(info.key, parseInt(e.target.value) || 0)
                       }
-                      className="w-14 rounded bg-zinc-800 border border-zinc-700/50 text-center text-sm text-zinc-200 py-0.5 focus:outline-none focus:ring-1 focus:ring-orange-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="w-12 rounded bg-background/60 border border-border/30 text-center text-xs text-foreground py-0.5 focus:outline-none focus:ring-1 focus:ring-primary/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                     <button
                       onClick={() =>
                         setMachines(info.key, (state?.machines ?? 1) + 1)
                       }
-                      className="w-6 h-6 rounded bg-zinc-700/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center text-sm transition-colors"
+                      className="w-5 h-5 rounded bg-secondary/50 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs transition-colors"
                     >
                       +
                     </button>
@@ -383,10 +404,12 @@ function ItemList({
                 </div>
 
                 {/* Overclock */}
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs text-zinc-400">Overclock</label>
-                    <span className="text-xs text-zinc-300 tabular-nums font-medium">
+                    <label className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      Overclock
+                    </label>
+                    <span className="text-[10px] text-foreground tabular-nums font-medium">
                       {Math.round((state?.overclock ?? 1) * 100)}%
                     </span>
                   </div>
@@ -398,14 +421,14 @@ function ItemList({
                     onChange={(e) =>
                       setOverclock(info.key, parseInt(e.target.value) / 100)
                     }
-                    className="w-full h-1.5 rounded-full appearance-none bg-zinc-700 cursor-pointer accent-orange-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:border-0"
+                    className="w-full h-1 rounded-full appearance-none bg-secondary cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:border-0"
                   />
-                  <div className="flex justify-between text-[10px] text-zinc-600">
+                  <div className="flex justify-between text-[9px] text-muted-foreground/40">
                     <span>1%</span>
-                    <Tooltip content="Default speed">
+                    <Tooltip content="Reset to default">
                       <button
                         onClick={() => setOverclock(info.key, 1.0)}
-                        className="text-zinc-500 hover:text-orange-400 transition-colors"
+                        className="hover:text-primary transition-colors"
                       >
                         100%
                       </button>
