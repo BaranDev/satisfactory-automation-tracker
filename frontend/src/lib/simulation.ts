@@ -4,6 +4,11 @@
 
 import { RECIPES, ITEMS, getRecipeForItem, type Recipe } from "@/data/recipes";
 
+/** Return the full list of recipes */
+export function getRecipes(): Recipe[] {
+  return RECIPES;
+}
+
 export interface SimulationInput {
   automated: boolean;
   machines: number;

@@ -215,7 +215,7 @@ export default function ItemGrid() {
                     >
                       <h3 className="font-medium">{recipe.label}</h3>
                       <p className="text-xs text-muted-foreground">
-                        {recipe.machine_type} • {recipe.craft_time_sec}s
+                        {recipe.machine} • {recipe.craft_time}s
                       </p>
                     </button>
                   ))}
