@@ -83,8 +83,8 @@ export default function SyncPanel() {
       bgColor: "bg-blue-500/10",
       icon: Cloud,
     },
-    unknown: {
-      label: "Unknown",
+    no_cloud: {
+      label: "Not synced",
       color: "text-muted-foreground",
       bgColor: "bg-muted/10",
       icon: Cloud,

@@ -57,8 +57,8 @@ MAX_IMAGE_SIZE = 256  # Max dimension for output icons
 WEBP_QUALITY = 85
 
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "satisfactory-assets")
 
 USER_AGENT = "SatisfactoryTrackerBot/1.0 (Educational project; one-time scrape)"
