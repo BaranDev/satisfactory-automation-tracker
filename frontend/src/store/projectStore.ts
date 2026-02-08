@@ -1,11 +1,21 @@
 import { create } from "zustand";
-import { ITEMS } from "@/data/recipes";
+import { nanoid } from "nanoid";
+import { ITEMS, RECIPES } from "@/data/recipes";
+import { MACHINES } from "@/data/machines";
 import {
   simulate as runSimulation,
+  simulateFactory,
   calcOutputPerMin,
 } from "@/lib/simulation";
 import * as api from "@/lib/api";
 import type { ProjectData } from "@/lib/api";
+import type {
+  MachineInstance,
+  MachineType,
+  FactoryModule,
+  FactorySimulationResult,
+  ConnectionPoint,
+} from "@/types/factory";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -56,6 +66,12 @@ interface ProjectStore {
   lastSyncedAt: string | null;
   previousState: ProjectData | null;
 
+  // New: Factory machine state
+  factoryMachines: MachineInstance[];
+  factorySimulation: FactorySimulationResult | null;
+  savedModules: FactoryModule[];
+  selectedMachineId: string | null;
+
   // Computed getters
   items: ProjectData["items"];
   projectId: string | null;
@@ -66,7 +82,7 @@ interface ProjectStore {
   loadProject: (projectId: string) => Promise<boolean>;
   setProjectName: (name: string) => void;
 
-  // Item actions
+  // Item actions (legacy)
   updateItem: (key: string, updates: Partial<ItemState>) => void;
   addItem: (key: string, item: ItemState) => void;
   removeItem: (key: string) => void;
@@ -74,12 +90,28 @@ interface ProjectStore {
   setMachines: (key: string, machines: number) => void;
   setOverclock: (key: string, overclock: number) => void;
 
-  // Serialization
-  exportJson: () => string;
-  importJson: (data: string) => boolean;
+  // Machine actions (new factory system)
+  addMachine: (machineType: MachineType, position?: { x: number; y: number }) => string;
+  removeMachine: (machineId: string) => void;
+  updateMachineRecipe: (machineId: string, recipeId: string | null) => void;
+  updateMachineOverclock: (machineId: string, overclock: number) => void;
+  updateMachinePosition: (machineId: string, position: { x: number; y: number }) => void;
+  setFactoryMachines: (machines: MachineInstance[]) => void;
+  selectMachine: (machineId: string | null) => void;
+
+  // Module actions
+  createModule: (name: string, machineIds: string[]) => FactoryModule | null;
+  saveModuleToLibrary: (module: FactoryModule) => void;
+  instantiateModule: (moduleId: string, position: { x: number; y: number }) => void;
 
   // Simulation
   simulate: () => void;
+  simulateFactoryMachines: () => void;
+  setFactorySimulation: (result: FactorySimulationResult) => void;
+
+  // Serialization
+  exportJson: () => string;
+  importJson: (data: string) => boolean;
 
   // Cloud sync
   pullFromCloud: () => Promise<boolean>;
@@ -125,6 +157,22 @@ function buildFullItems(
   return result;
 }
 
+function makeEmptyConnectionPoints(machineType: MachineType): { inputs: ConnectionPoint[]; outputs: ConnectionPoint[] } {
+  const info = MACHINES[machineType];
+  if (!info) return { inputs: [], outputs: [] };
+
+  const inputs: ConnectionPoint[] = Array.from(
+    { length: info.inputSlots + info.fluidInputs },
+    (_, i) => ({ slot: i, connectedTo: null, itemType: null, actualRate: 0, maxRate: 780 }),
+  );
+  const outputs: ConnectionPoint[] = Array.from(
+    { length: info.outputSlots + info.fluidOutputs },
+    (_, i) => ({ slot: i, connectedTo: null, itemType: null, actualRate: 0, maxRate: 780 }),
+  );
+
+  return { inputs, outputs };
+}
+
 // ─── Store Implementation ────────────────────────────────────
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -136,6 +184,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   syncStatus: "no_cloud",
   lastSyncedAt: null,
   previousState: null,
+
+  // New factory state
+  factoryMachines: [],
+  factorySimulation: null,
+  savedModules: [],
+  selectedMachineId: null,
 
   get items() {
     return get().project?.items ?? {};
@@ -164,6 +218,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         syncStatus: "in_sync",
         lastSyncedAt: new Date().toISOString(),
         isLoading: false,
+        factoryMachines: [],
+        factorySimulation: null,
       });
       return project;
     } catch (err) {
@@ -184,13 +240,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         ...data,
         items: buildFullItems(data.items),
       };
+
+      // Load factory machines from project data if available
+      const factoryData = (data as unknown as Record<string, unknown>).factory_machines as MachineInstance[] | undefined;
+
       set({
         project,
         cloudProject: data,
         syncStatus: "in_sync",
         lastSyncedAt: new Date().toISOString(),
         isLoading: false,
+        factoryMachines: factoryData ?? [],
+        factorySimulation: null,
       });
+
+      // Run factory simulation if machines exist
+      if (factoryData && factoryData.length > 0) {
+        const result = simulateFactory(factoryData);
+        set({ factorySimulation: result });
+      }
+
       return true;
     } catch (err) {
       set({ isLoading: false, error: String(err) });
@@ -208,6 +277,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
   },
 
+  // ─── Legacy Item Actions ─────────────────────────────────
+
   updateItem: (key: string, updates: Partial<ItemState>) => {
     const { project } = get();
     if (!project || !project.items[key]) return;
@@ -215,10 +286,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       previousState: project,
       project: {
         ...project,
-        items: {
-          ...project.items,
-          [key]: { ...project.items[key], ...updates },
-        },
+        items: { ...project.items, [key]: { ...project.items[key], ...updates } },
         last_updated: new Date().toISOString(),
       },
       syncStatus: "local_changes",
@@ -245,11 +313,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const { [key]: _, ...rest } = project.items;
     set({
       previousState: project,
-      project: {
-        ...project,
-        items: rest,
-        last_updated: new Date().toISOString(),
-      },
+      project: { ...project, items: rest, last_updated: new Date().toISOString() },
       syncStatus: "local_changes",
     });
   },
@@ -262,10 +326,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       previousState: project,
       project: {
         ...project,
-        items: {
-          ...project.items,
-          [key]: { ...item, automated: !item.automated },
-        },
+        items: { ...project.items, [key]: { ...item, automated: !item.automated } },
         last_updated: new Date().toISOString(),
       },
       syncStatus: "local_changes",
@@ -279,10 +340,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       previousState: project,
       project: {
         ...project,
-        items: {
-          ...project.items,
-          [key]: { ...project.items[key], machines: Math.max(0, machines) },
-        },
+        items: { ...project.items, [key]: { ...project.items[key], machines: Math.max(0, machines) } },
         last_updated: new Date().toISOString(),
       },
       syncStatus: "local_changes",
@@ -298,10 +356,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         ...project,
         items: {
           ...project.items,
-          [key]: {
-            ...project.items[key],
-            overclock: Math.max(0.01, Math.min(2.5, overclock)),
-          },
+          [key]: { ...project.items[key], overclock: Math.max(0.01, Math.min(2.5, overclock)) },
         },
         last_updated: new Date().toISOString(),
       },
@@ -309,46 +364,185 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
   },
 
-  exportJson: () => {
-    const { project } = get();
-    return JSON.stringify(project, null, 2);
+  // ─── New Machine Actions ─────────────────────────────────
+
+  addMachine: (machineType: MachineType, position?: { x: number; y: number }) => {
+    const id = nanoid(8);
+    const info = MACHINES[machineType];
+    const { inputs, outputs } = makeEmptyConnectionPoints(machineType);
+
+    const newMachine: MachineInstance = {
+      id,
+      machineType,
+      recipe: info?.compatibleRecipes[0] ?? null,
+      overclock: 1.0,
+      position: position ?? { x: Math.random() * 400 + 100, y: Math.random() * 300 + 100 },
+      inputs,
+      outputs,
+    };
+
+    const { factoryMachines } = get();
+    const updated = [...factoryMachines, newMachine];
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+
+    const result = simulateFactory(updated);
+    set({ factorySimulation: result });
+
+    return id;
   },
 
-  importJson: (data: string) => {
+  removeMachine: (machineId: string) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines
+      .filter(m => m.id !== machineId)
+      .map(m => ({
+        ...m,
+        inputs: m.inputs.map(inp =>
+          inp.connectedTo?.machineId === machineId
+            ? { ...inp, connectedTo: null, itemType: null, actualRate: 0 }
+            : inp,
+        ),
+        outputs: m.outputs.map(out =>
+          out.connectedTo?.machineId === machineId
+            ? { ...out, connectedTo: null, itemType: null, actualRate: 0 }
+            : out,
+        ),
+      }));
+
+    set({
+      factoryMachines: updated,
+      selectedMachineId: get().selectedMachineId === machineId ? null : get().selectedMachineId,
+      syncStatus: "local_changes",
+    });
+
+    const result = simulateFactory(updated);
+    set({ factorySimulation: result });
+  },
+
+  updateMachineRecipe: (machineId: string, recipeId: string | null) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m =>
+      m.id === machineId ? { ...m, recipe: recipeId } : m,
+    );
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+
+    const result = simulateFactory(updated);
+    set({ factorySimulation: result });
+  },
+
+  updateMachineOverclock: (machineId: string, overclock: number) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m =>
+      m.id === machineId
+        ? { ...m, overclock: Math.max(0.01, Math.min(2.5, overclock)) }
+        : m,
+    );
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+
+    const result = simulateFactory(updated);
+    set({ factorySimulation: result });
+  },
+
+  updateMachinePosition: (machineId: string, position: { x: number; y: number }) => {
+    const { factoryMachines } = get();
+    set({
+      factoryMachines: factoryMachines.map(m =>
+        m.id === machineId ? { ...m, position } : m,
+      ),
+    });
+  },
+
+  setFactoryMachines: (machines: MachineInstance[]) => {
+    set({ factoryMachines: machines, syncStatus: "local_changes" });
+  },
+
+  selectMachine: (machineId: string | null) => {
+    set({ selectedMachineId: machineId });
+  },
+
+  // ─── Module Actions ──────────────────────────────────────
+
+  createModule: (name: string, machineIds: string[]) => {
+    const { factoryMachines } = get();
+    const selected = factoryMachines.filter(m => machineIds.includes(m.id));
+    if (selected.length === 0) return null;
+
+    const module: FactoryModule = {
+      id: nanoid(8),
+      name,
+      machines: selected,
+      exposedInputs: [],
+      exposedOutputs: [],
+    };
+
+    return module;
+  },
+
+  saveModuleToLibrary: (module: FactoryModule) => {
+    const { savedModules } = get();
+    set({ savedModules: [...savedModules.filter(m => m.id !== module.id), module] });
+
     try {
-      const parsed = JSON.parse(data) as ProjectData;
-      if (!parsed.project_id || !parsed.name || !parsed.items) return false;
-      const { project } = get();
-      set({
-        previousState: project,
-        project: parsed,
-        syncStatus: "local_changes",
-      });
-      return true;
+      const existing = JSON.parse(localStorage.getItem("factory-modules") ?? "[]") as FactoryModule[];
+      const updated = [...existing.filter(m => m.id !== module.id), module];
+      localStorage.setItem("factory-modules", JSON.stringify(updated));
     } catch {
-      return false;
+      // ignore
     }
   },
+
+  instantiateModule: (moduleId: string, position: { x: number; y: number }) => {
+    const { savedModules, factoryMachines } = get();
+    const module = savedModules.find(m => m.id === moduleId);
+    if (!module) return;
+
+    const idMap = new Map<string, string>();
+    const newMachines: MachineInstance[] = module.machines.map(m => {
+      const newId = nanoid(8);
+      idMap.set(m.id, newId);
+      return {
+        ...m,
+        id: newId,
+        position: { x: m.position.x + position.x, y: m.position.y + position.y },
+      };
+    });
+
+    for (const machine of newMachines) {
+      machine.inputs = machine.inputs.map(inp => ({
+        ...inp,
+        connectedTo: inp.connectedTo
+          ? { machineId: idMap.get(inp.connectedTo.machineId) ?? inp.connectedTo.machineId, slot: inp.connectedTo.slot }
+          : null,
+      }));
+      machine.outputs = machine.outputs.map(out => ({
+        ...out,
+        connectedTo: out.connectedTo
+          ? { machineId: idMap.get(out.connectedTo.machineId) ?? out.connectedTo.machineId, slot: out.connectedTo.slot }
+          : null,
+      }));
+    }
+
+    const updated = [...factoryMachines, ...newMachines];
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+
+    const result = simulateFactory(updated);
+    set({ factorySimulation: result });
+  },
+
+  // ─── Simulation ──────────────────────────────────────────
 
   simulate: () => {
     const { project } = get();
     if (!project) return;
 
-    const simInput: Record<
-      string,
-      { automated: boolean; machines: number; overclock: number }
-    > = {};
+    const simInput: Record<string, { automated: boolean; machines: number; overclock: number }> = Object.create(null);
     for (const [key, item] of Object.entries(project.items)) {
-      simInput[key] = {
-        automated: item.automated,
-        machines: item.machines,
-        overclock: item.overclock,
-      };
+      simInput[key] = { automated: item.automated, machines: item.machines, overclock: item.overclock };
     }
 
     const result = runSimulation(simInput);
 
-    const displayItems: Record<string, DisplayItemResult> = {};
+    const displayItems: Record<string, DisplayItemResult> = Object.create(null);
     for (const [key, node] of Object.entries(result.nodes)) {
       displayItems[key] = {
         outputPerMin: node.supplyRate,
@@ -359,37 +553,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     const displayBottlenecks: DisplayBottleneck[] = result.bottlenecks
       .slice(0, 3)
-      .map((node) => {
+      .map(node => {
         const shortfall = node.demandRate - node.supplyRate;
-        const shortfallPercent =
-          node.demandRate > 0 ? (shortfall / node.demandRate) * 100 : 100;
+        const shortfallPercent = node.demandRate > 0 ? (shortfall / node.demandRate) * 100 : 100;
         const recipe = node.recipe;
         let neededMachines = 0;
         if (recipe) {
-          const outputPerMachine = calcOutputPerMin(
-            recipe,
-            1,
-            node.overclock || 1
-          );
+          const outputPerMachine = calcOutputPerMin(recipe, 1, node.overclock || 1);
           neededMachines = Math.ceil(shortfall / outputPerMachine);
         }
-        return {
-          itemKey: node.itemKey,
-          label: node.label,
-          shortfall,
-          shortfallPercent,
-          neededMachines,
-        };
+        return { itemKey: node.itemKey, label: node.label, shortfall, shortfallPercent, neededMachines };
       });
 
-    const displaySuggestions: DisplaySuggestion[] = result.suggestions.map(
-      (s) => ({
-        itemKey: s.itemKey,
-        message: s.message,
-      })
-    );
+    const displaySuggestions: DisplaySuggestion[] = result.suggestions.map(s => ({
+      itemKey: s.itemKey,
+      message: s.message,
+    }));
 
-    const rawMaterials: Record<string, number> = {};
+    const rawMaterials: Record<string, number> = Object.create(null);
     for (const [key, node] of Object.entries(result.nodes)) {
       if (node.isRawResource && node.demandRate > 0) {
         rawMaterials[key] = node.demandRate;
@@ -406,6 +587,42 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
   },
 
+  simulateFactoryMachines: () => {
+    const { factoryMachines } = get();
+    const result = simulateFactory(factoryMachines);
+    set({ factorySimulation: result });
+  },
+
+  setFactorySimulation: (result: FactorySimulationResult) => {
+    set({ factorySimulation: result });
+  },
+
+  // ─── Serialization ───────────────────────────────────────
+
+  exportJson: () => {
+    const { project, factoryMachines } = get();
+    return JSON.stringify({ ...project, factory_machines: factoryMachines }, null, 2);
+  },
+
+  importJson: (data: string) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (!parsed.project_id || !parsed.name || !parsed.items) return false;
+      const { project } = get();
+      set({
+        previousState: project,
+        project: parsed as ProjectData,
+        factoryMachines: parsed.factory_machines ?? [],
+        syncStatus: "local_changes",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // ─── Cloud Sync ──────────────────────────────────────────
+
   pullFromCloud: async () => {
     const { project } = get();
     if (!project) return false;
@@ -416,7 +633,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         set({ isLoading: false });
         return false;
       }
-      // Save current local state so user can undo back to it
+      const factoryData = (data as unknown as Record<string, unknown>).factory_machines as MachineInstance[] | undefined;
       set({
         previousState: project,
         project: { ...data, items: buildFullItems(data.items) },
@@ -425,7 +642,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         lastSyncedAt: new Date().toISOString(),
         isLoading: false,
         simulationResult: null,
+        factoryMachines: factoryData ?? [],
       });
+
+      if (factoryData && factoryData.length > 0) {
+        const result = simulateFactory(factoryData);
+        set({ factorySimulation: result });
+      }
+
       return true;
     } catch {
       set({ isLoading: false });
@@ -434,7 +658,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   pushToCloud: async (force = false) => {
-    const { project, cloudProject } = get();
+    const { project, cloudProject, factoryMachines } = get();
     if (!project) return { success: false };
     set({ isLoading: true });
     try {
@@ -444,7 +668,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           pushItems[key] = item;
         }
       }
-      const pushData: ProjectData = { ...project, items: pushItems };
+      const pushData = {
+        ...project,
+        items: pushItems,
+        factory_machines: factoryMachines,
+      } as ProjectData;
 
       const result = await api.updateProject(project.project_id, pushData, {
         force,

@@ -4,83 +4,54 @@ import {
   Send,
   Bot,
   User,
-  Key,
   X,
   Loader2,
   Sparkles,
   AlertCircle,
-  ExternalLink,
+  Settings,
+  Zap,
 } from "lucide-react";
 import { useProjectStore } from "@/store/projectStore";
-import { ITEMS, getRecipeForItem } from "@/data/recipes";
 import { cn } from "@/lib/utils";
+import {
+  buildLegacyFactoryContext,
+  buildFactoryContext,
+  buildFullSystemPrompt,
+  parseAISuggestions,
+  stripSuggestionTags,
+  type AISuggestion,
+} from "@/lib/ai-context";
+import AISettings, {
+  loadAIConfig,
+  saveAIConfig,
+  getEndpointForConfig,
+  type AIConfig,
+} from "./AISettings";
+import type { FactorySimulationResult, MachineInstance } from "@/types/factory";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  suggestions?: AISuggestion[];
 }
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "z-ai/glm-4.5-air:free";
-
-const STORAGE_KEY = "openrouter-api-key";
-
-function buildSystemPrompt(
-  projectName: string,
-  automatedItems: { key: string; label: string; machines: number; overclock: number }[],
-  bottlenecks: { label: string; shortfall: number }[],
-): string {
-  const itemList = automatedItems
-    .map(
-      (i) =>
-        `- ${i.label}: ${i.machines} machine(s) at ${Math.round(i.overclock * 100)}% overclock`,
-    )
-    .join("\n");
-
-  const bottleneckList = bottlenecks.length > 0
-    ? bottlenecks.map((b) => `- ${b.label}: shortfall ${b.shortfall.toFixed(1)}/min`).join("\n")
-    : "None detected";
-
-  return `You are FICSIT Factory AI, an expert automation consultant for the game Satisfactory. You help players optimize their factory production lines.
-
-Current Factory: "${projectName}"
-
-Currently Automated Items:
-${itemList || "No items automated yet."}
-
-Current Bottlenecks:
-${bottleneckList}
-
-Available game knowledge:
-- Satisfactory has resources, ingots, parts, intermediates, fluids, fuel, nuclear items, alien tech, and space elevator parts
-- Production chains go: Raw Resources -> Ingots -> Basic Parts -> Intermediates -> Advanced Products
-- Machines include: Miners, Smelters, Foundries, Constructors, Assemblers, Manufacturers, Refineries, Blenders, Particle Accelerators, Converters, Quantum Encoders
-- Overclock range: 1% to 250% (higher overclock uses exponentially more power)
-- Each machine type has specific recipes with defined input/output rates
-
-Your role:
-1. Help users plan and optimize their factory production lines
-2. Suggest which items to automate next based on their current setup
-3. Identify and explain bottlenecks and how to resolve them
-4. Recommend optimal machine counts and overclock settings
-5. Explain production chains and dependencies
-6. Help with factory planning for space elevator parts and end-game items
-
-Keep responses concise and practical. Use specific numbers when suggesting machine counts. Reference the user's current factory state when relevant.`;
+interface AiChatProps {
+  factoryMachines?: MachineInstance[];
+  factorySimulation?: FactorySimulationResult | null;
 }
 
-export default function AiChat() {
+export default function AiChat({ factoryMachines, factorySimulation }: AiChatProps) {
   const { project, simulationResult } = useProjectStore();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY) ?? "");
-  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [config, setConfig] = useState<AIConfig>(loadAIConfig);
+  const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const hasKey = apiKey.length > 0;
+  const hasKey = config.apiKey.length > 0;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -88,68 +59,57 @@ export default function AiChat() {
     }
   }, [messages]);
 
-  const saveKey = useCallback((key: string) => {
-    setApiKey(key);
-    localStorage.setItem(STORAGE_KEY, key);
-    setShowKeyInput(false);
+  const handleConfigChange = useCallback((newConfig: AIConfig) => {
+    setConfig(newConfig);
+    saveAIConfig(newConfig);
     setError(null);
   }, []);
 
-  const clearKey = useCallback(() => {
-    setApiKey("");
-    localStorage.removeItem(STORAGE_KEY);
-    setMessages([]);
-  }, []);
+  const sendMessage = useCallback(async (messageText?: string) => {
+    const text = messageText ?? input.trim();
+    if (!text || !config.apiKey || isLoading || !project) return;
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || !apiKey || isLoading || !project) return;
-
-    const userMessage: ChatMessage = { role: "user", content: input.trim() };
-    setInput("");
+    const userMessage: ChatMessage = { role: "user", content: text };
+    if (!messageText) setInput("");
     setError(null);
 
-    const automatedItems = Object.entries(project.items)
-      .filter(([, i]) => i.automated)
-      .map(([key, i]) => ({
-        key,
-        label: ITEMS[key]?.label ?? key,
-        machines: i.machines,
-        overclock: i.overclock,
-      }));
+    // Build factory context — use new machine system if available, otherwise legacy
+    let factoryContext: string;
+    if (factoryMachines && factoryMachines.length > 0) {
+      factoryContext = buildFactoryContext(
+        project.name,
+        factoryMachines,
+        factorySimulation ?? null,
+      );
+    } else {
+      factoryContext = buildLegacyFactoryContext(project, simulationResult);
+    }
 
-    const bottlenecks = simulationResult?.bottlenecks.map((b) => ({
-      label: b.label,
-      shortfall: b.shortfall,
-    })) ?? [];
-
-    const systemPrompt = buildSystemPrompt(
-      project.name,
-      automatedItems,
-      bottlenecks,
-    );
+    const systemPrompt = buildFullSystemPrompt(factoryContext);
 
     const newMessages: ChatMessage[] = [...messages, userMessage];
     setMessages(newMessages);
     setIsLoading(true);
 
     try {
+      const endpoint = getEndpointForConfig(config);
       const apiMessages = [
         { role: "system", content: systemPrompt },
-        ...newMessages.map((m) => ({ role: m.role, content: m.content })),
+        ...newMessages.map(m => ({ role: m.role, content: m.content })),
       ];
 
-      const response = await fetch(OPENROUTER_URL, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${config.apiKey}`,
           "HTTP-Referer": window.location.origin,
           "X-Title": "FICSIT Automation Tracker",
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: config.model,
           messages: apiMessages,
-          max_tokens: 1024,
+          max_tokens: 2048,
           temperature: 0.7,
         }),
       });
@@ -157,7 +117,7 @@ export default function AiChat() {
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         if (response.status === 401) {
-          throw new Error("Invalid API key. Please check your OpenRouter key.");
+          throw new Error("Invalid API key. Check your key in settings.");
         }
         throw new Error(
           (errData as { error?: { message?: string } })?.error?.message ??
@@ -168,19 +128,23 @@ export default function AiChat() {
       const data = (await response.json()) as {
         choices: { message: { content: string } }[];
       };
-      const assistantContent =
+      const rawContent =
         data.choices?.[0]?.message?.content ?? "No response received.";
+
+      // Parse any structured suggestions from the response
+      const suggestions = parseAISuggestions(rawContent);
+      const cleanContent = stripSuggestionTags(rawContent);
 
       setMessages([
         ...newMessages,
-        { role: "assistant", content: assistantContent },
+        { role: "assistant", content: cleanContent, suggestions },
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to get response");
     } finally {
       setIsLoading(false);
     }
-  }, [input, apiKey, isLoading, project, messages, simulationResult]);
+  }, [input, config, isLoading, project, messages, simulationResult, factoryMachines, factorySimulation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -189,8 +153,11 @@ export default function AiChat() {
     }
   };
 
+  // Model name for display
+  const modelLabel = config.model.split("/").pop()?.replace(/:.*$/, "") ?? config.model;
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2">
@@ -200,78 +167,34 @@ export default function AiChat() {
             BETA
           </span>
         </div>
-        <button
-          onClick={() => (hasKey ? setShowKeyInput(!showKeyInput) : setShowKeyInput(true))}
-          className={cn(
-            "p-1.5 rounded transition-colors",
-            hasKey
-              ? "text-neon-green hover:bg-neon-green/10"
-              : "text-muted-foreground hover:bg-secondary",
+        <div className="flex items-center gap-1">
+          {hasKey && (
+            <span className="text-[10px] text-muted-foreground mr-1 max-w-[80px] truncate" title={config.model}>
+              {modelLabel}
+            </span>
           )}
-          title={hasKey ? "API key configured" : "Set API key"}
-        >
-          <Key className="w-3.5 h-3.5" />
-        </button>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={cn(
+              "p-1.5 rounded transition-colors",
+              hasKey
+                ? "text-neon-green hover:bg-neon-green/10"
+                : "text-muted-foreground hover:bg-secondary",
+            )}
+            title="AI Settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Key Input */}
-      <AnimatePresence>
-        {showKeyInput && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-border/50"
-          >
-            <div className="p-3 space-y-2">
-              <p className="text-xs text-muted-foreground">
-                Enter your OpenRouter API key to use the AI assistant.{" "}
-                <a
-                  href="https://openrouter.ai/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                >
-                  Get a free key <ExternalLink className="w-3 h-3" />
-                </a>
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  placeholder="sk-or-..."
-                  defaultValue={apiKey}
-                  className="flex-1 text-xs px-2 py-1.5 rounded bg-background/80 border border-border/50 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      saveKey((e.target as HTMLInputElement).value);
-                    }
-                  }}
-                  ref={(el) => {
-                    if (el && !apiKey) el.focus();
-                  }}
-                />
-                <button
-                  onClick={(e) => {
-                    const input = (e.currentTarget.previousSibling as HTMLInputElement);
-                    saveKey(input.value);
-                  }}
-                  className="px-2 py-1.5 rounded bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30 transition-colors"
-                >
-                  Save
-                </button>
-                {hasKey && (
-                  <button
-                    onClick={clearKey}
-                    className="p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Settings Panel */}
+      <AISettings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        config={config}
+        onConfigChange={handleConfigChange}
+      />
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -282,10 +205,16 @@ export default function AiChat() {
               AI Factory Assistant
             </p>
             <p className="text-xs text-muted-foreground/60 leading-relaxed">
-              Set up your OpenRouter API key to get AI-powered factory
-              optimization suggestions, production planning help, and
-              bottleneck analysis.
+              Configure your AI model and API key in settings to get
+              optimization suggestions, production planning, and bottleneck
+              analysis.
             </p>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="mt-3 text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              <Settings className="w-3 h-3" /> Open Settings
+            </button>
           </div>
         )}
 
@@ -300,13 +229,11 @@ export default function AiChat() {
                 "What should I automate next?",
                 "How do I fix my bottlenecks?",
                 "Plan a production line for computers",
-              ].map((suggestion) => (
+                "How much power does my factory need?",
+              ].map(suggestion => (
                 <button
                   key={suggestion}
-                  onClick={() => {
-                    setInput(suggestion);
-                    inputRef.current?.focus();
-                  }}
+                  onClick={() => sendMessage(suggestion)}
                   className="w-full text-left text-xs px-3 py-2 rounded bg-secondary/30 text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors"
                 >
                   {suggestion}
@@ -331,15 +258,33 @@ export default function AiChat() {
                 <Bot className="w-3.5 h-3.5 text-primary" />
               </div>
             )}
-            <div
-              className={cn(
-                "max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed",
-                msg.role === "user"
-                  ? "bg-primary/15 text-foreground"
-                  : "bg-secondary/40 text-foreground",
+            <div className="max-w-[85%] space-y-2">
+              <div
+                className={cn(
+                  "rounded-lg px-3 py-2 text-xs leading-relaxed",
+                  msg.role === "user"
+                    ? "bg-primary/15 text-foreground"
+                    : "bg-secondary/40 text-foreground",
+                )}
+              >
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              </div>
+
+              {/* Suggestion buttons from AI */}
+              {msg.suggestions && msg.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  {msg.suggestions.map((s, j) => (
+                    <button
+                      key={j}
+                      className="w-full text-left text-[10px] px-2.5 py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5"
+                      title={`${s.type}: ${JSON.stringify(s.attributes)}`}
+                    >
+                      <Zap className="w-3 h-3 shrink-0" />
+                      {s.text}
+                    </button>
+                  ))}
+                </div>
               )}
-            >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
             </div>
             {msg.role === "user" && (
               <div className="w-6 h-6 rounded bg-secondary/40 flex items-center justify-center shrink-0 mt-0.5">
@@ -383,14 +328,14 @@ export default function AiChat() {
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask about your factory..."
               rows={1}
               className="flex-1 text-xs px-3 py-2 rounded bg-background/80 border border-border/50 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
             />
             <button
-              onClick={sendMessage}
+              onClick={() => sendMessage()}
               disabled={!input.trim() || isLoading}
               className="px-3 py-2 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
@@ -398,7 +343,7 @@ export default function AiChat() {
             </button>
           </div>
           <p className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">
-            Powered by GLM-4.5 via OpenRouter
+            Powered by {modelLabel} via {config.customEndpoint ? "custom endpoint" : "OpenRouter"}
           </p>
         </div>
       )}

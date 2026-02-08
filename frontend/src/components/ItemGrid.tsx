@@ -90,7 +90,8 @@ export default function ItemGrid() {
   const items = project?.items ?? {};
 
   const groupedItems = useMemo(() => {
-    const groups: Record<string, (ItemInfo & { key: string })[]> = {};
+    const groups: Record<string, (ItemInfo & { key: string })[]> =
+      Object.create(null);
     for (const [key, info] of Object.entries(ITEMS)) {
       const cat = info.category;
       if (!groups[cat]) groups[cat] = [];
