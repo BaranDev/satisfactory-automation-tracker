@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Send,
   Bot,
@@ -10,6 +12,7 @@ import {
   AlertCircle,
   Settings,
   Zap,
+  Trash2,
 } from "lucide-react";
 import { useProjectStore } from "@/store/projectStore";
 import { cn } from "@/lib/utils";
@@ -40,7 +43,10 @@ interface AiChatProps {
   factorySimulation?: FactorySimulationResult | null;
 }
 
-export default function AiChat({ factoryMachines, factorySimulation }: AiChatProps) {
+export default function AiChat({
+  factoryMachines,
+  factorySimulation,
+}: AiChatProps) {
   const { project, simulationResult } = useProjectStore();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -52,6 +58,44 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const hasKey = config.apiKey.length > 0;
+  const projectId = project?.project_id;
+
+  // Load chat history from localStorage when project changes
+  useEffect(() => {
+    if (projectId) {
+      const saved = localStorage.getItem(`chat_history_${projectId}`);
+      if (saved) {
+        try {
+          setMessages(JSON.parse(saved));
+        } catch (e) {
+          console.error("Failed to parse chat history", e);
+        }
+      } else {
+        setMessages([]);
+      }
+    } else {
+      setMessages([]);
+    }
+  }, [projectId]);
+
+  // Save chat history to localStorage when messages change
+  useEffect(() => {
+    if (projectId && messages.length > 0) {
+      localStorage.setItem(
+        `chat_history_${projectId}`,
+        JSON.stringify(messages),
+      );
+    } else if (projectId && messages.length === 0) {
+      // If cleared, remove from storage
+      localStorage.removeItem(`chat_history_${projectId}`);
+    }
+  }, [messages, projectId]);
+
+  const clearHistory = useCallback(() => {
+    if (confirm("Clear local chat history?")) {
+      setMessages([]);
+    }
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -65,86 +109,171 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
     setError(null);
   }, []);
 
-  const sendMessage = useCallback(async (messageText?: string) => {
-    const text = messageText ?? input.trim();
-    if (!text || !config.apiKey || isLoading || !project) return;
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-    const userMessage: ChatMessage = { role: "user", content: text };
-    if (!messageText) setInput("");
-    setError(null);
-
-    // Build factory context — use new machine system if available, otherwise legacy
-    let factoryContext: string;
-    if (factoryMachines && factoryMachines.length > 0) {
-      factoryContext = buildFactoryContext(
-        project.name,
-        factoryMachines,
-        factorySimulation ?? null,
-      );
-    } else {
-      factoryContext = buildLegacyFactoryContext(project, simulationResult);
-    }
-
-    const systemPrompt = buildFullSystemPrompt(factoryContext);
-
-    const newMessages: ChatMessage[] = [...messages, userMessage];
-    setMessages(newMessages);
-    setIsLoading(true);
-
-    try {
-      const endpoint = getEndpointForConfig(config);
-      const apiMessages = [
-        { role: "system", content: systemPrompt },
-        ...newMessages.map(m => ({ role: m.role, content: m.content })),
-      ];
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "FICSIT Automation Tracker",
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages: apiMessages,
-          max_tokens: 2048,
-          temperature: 0.7,
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        if (response.status === 401) {
-          throw new Error("Invalid API key. Check your key in settings.");
-        }
-        throw new Error(
-          (errData as { error?: { message?: string } })?.error?.message ??
-            `Request failed (${response.status})`,
-        );
-      }
-
-      const data = (await response.json()) as {
-        choices: { message: { content: string } }[];
-      };
-      const rawContent =
-        data.choices?.[0]?.message?.content ?? "No response received.";
-
-      // Parse any structured suggestions from the response
-      const suggestions = parseAISuggestions(rawContent);
-      const cleanContent = stripSuggestionTags(rawContent);
-
-      setMessages([
-        ...newMessages,
-        { role: "assistant", content: cleanContent, suggestions },
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to get response");
-    } finally {
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsStreaming(false);
       setIsLoading(false);
     }
-  }, [input, config, isLoading, project, messages, simulationResult, factoryMachines, factorySimulation]);
+  }, []);
+
+  const sendMessage = useCallback(
+    async (messageText?: string) => {
+      const text = messageText ?? input.trim();
+      if (!text || !config.apiKey || isLoading || isStreaming || !project)
+        return;
+
+      const userMessage: ChatMessage = { role: "user", content: text };
+      if (!messageText) setInput("");
+      setError(null);
+
+      // Create placeholder for assistant message
+      const newMessages: ChatMessage[] = [
+        ...messages,
+        userMessage,
+        { role: "assistant", content: "" },
+      ];
+      setMessages(newMessages);
+      setIsLoading(true);
+      setIsStreaming(true);
+
+      try {
+        // Build factory context
+        let factoryContext: string;
+        if (factoryMachines && factoryMachines.length > 0) {
+          factoryContext = buildFactoryContext(
+            project.name,
+            factoryMachines,
+            factorySimulation ?? null,
+          );
+        } else {
+          factoryContext = buildLegacyFactoryContext(project, simulationResult);
+        }
+        const systemPrompt = buildFullSystemPrompt(factoryContext);
+
+        // Prepare API messages
+        const apiMessages = [
+          { role: "system", content: systemPrompt },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          { role: "user", content: text },
+        ];
+
+        // Setup abort controller
+        abortControllerRef.current = new AbortController();
+        const endpoint = getEndpointForConfig(config);
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.apiKey}`,
+            "HTTP-Referer": window.location.origin,
+            "X-Title": "FICSIT Automation Tracker",
+          },
+          body: JSON.stringify({
+            model: config.model,
+            messages: apiMessages,
+            max_tokens: 2048,
+            temperature: 0.7,
+            stream: true, // Enable streaming
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          if (response.status === 401) throw new Error("Invalid API key.");
+          throw new Error(
+            (errData as any)?.error?.message ?? `Error ${response.status}`,
+          );
+        }
+
+        if (!response.body) throw new Error("No response body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let assistantContent = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n").filter((line) => line.trim() !== "");
+
+          for (const line of lines) {
+            if (line === "data: [DONE]") continue;
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                const delta = data.choices?.[0]?.delta?.content || "";
+                if (delta) {
+                  assistantContent += delta;
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg.role === "assistant") {
+                      lastMsg.content = assistantContent;
+                    }
+                    return updated;
+                  });
+                }
+              } catch (e) {
+                console.warn("Failed to parse stream chunk", e);
+              }
+            }
+          }
+        }
+
+        // Post-processing: Extract suggestions from the full content
+        const suggestions = parseAISuggestions(assistantContent);
+        const cleanContent = stripSuggestionTags(assistantContent);
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastMsg = updated[updated.length - 1];
+          if (lastMsg.role === "assistant") {
+            lastMsg.content = cleanContent;
+            lastMsg.suggestions = suggestions;
+          }
+          return updated;
+        });
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          console.log("Generation stopped by user");
+        } else {
+          setError(err.message || "Failed to get response");
+          // Remove the empty assistant message on error if it's empty
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last.role === "assistant" && !last.content) {
+              return prev.slice(0, -1);
+            }
+            return prev;
+          });
+        }
+      } finally {
+        setIsLoading(false);
+        setIsStreaming(false);
+        abortControllerRef.current = null;
+      }
+    },
+    [
+      input,
+      config,
+      isLoading,
+      isStreaming,
+      project,
+      messages,
+      simulationResult,
+      factoryMachines,
+      factorySimulation,
+    ],
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -154,7 +283,8 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
   };
 
   // Model name for display
-  const modelLabel = config.model.split("/").pop()?.replace(/:.*$/, "") ?? config.model;
+  const modelLabel =
+    config.model.split("/").pop()?.replace(/:.*$/, "") ?? config.model;
 
   return (
     <div className="flex flex-col h-full relative">
@@ -169,9 +299,21 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
         </div>
         <div className="flex items-center gap-1">
           {hasKey && (
-            <span className="text-[10px] text-muted-foreground mr-1 max-w-[80px] truncate" title={config.model}>
+            <span
+              className="text-[10px] text-muted-foreground mr-1 max-w-[80px] truncate"
+              title={config.model}
+            >
               {modelLabel}
             </span>
+          )}
+          {messages.length > 0 && (
+            <button
+              onClick={clearHistory}
+              className="p-1.5 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              title="Clear Chat History"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           )}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -230,7 +372,7 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
                 "How do I fix my bottlenecks?",
                 "Plan a production line for computers",
                 "How much power does my factory need?",
-              ].map(suggestion => (
+              ].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => sendMessage(suggestion)}
@@ -261,13 +403,37 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
             <div className="max-w-[85%] space-y-2">
               <div
                 className={cn(
-                  "rounded-lg px-3 py-2 text-xs leading-relaxed",
+                  "rounded-lg px-3 py-2 text-xs leading-relaxed min-h-[2rem]",
                   msg.role === "user"
                     ? "bg-primary/15 text-foreground"
                     : "bg-secondary/40 text-foreground",
                 )}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === "user" ? (
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <div className="markdown-content">
+                    {msg.content ? (
+                      <div className="prose prose-invert prose-xs max-w-none [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>h1]:text-sm [&>h1]:font-bold [&>h2]:text-xs [&>h2]:font-bold [&>code]:bg-black/30 [&>code]:px-1 [&>code]:rounded [&>pre]:bg-black/30 [&>pre]:p-2 [&>pre]:rounded [&>pre]:overflow-x-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : /* Show spinner if purely empty (waiting for start) */
+                    isLoading && isStreaming && i === messages.length - 1 ? (
+                      <span className="flex items-center gap-2 text-muted-foreground/50 italic">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Thinking...
+                      </span>
+                    ) : null}
+                    {/* Blinking cursor at end of streaming message */}
+                    {isStreaming &&
+                      i === messages.length - 1 &&
+                      msg.content && (
+                        <span className="inline-block w-1.5 h-3 bg-primary/50 ml-0.5 animate-pulse align-middle" />
+                      )}
+                  </div>
+                )}
               </div>
 
               {/* Suggestion buttons from AI */}
@@ -276,6 +442,10 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
                   {msg.suggestions.map((s, j) => (
                     <button
                       key={j}
+                      onClick={() => {
+                        // TODO: Implement suggestion actions
+                        console.log("Processing suggestion:", s);
+                      }}
                       className="w-full text-left text-[10px] px-2.5 py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5"
                       title={`${s.type}: ${JSON.stringify(s.attributes)}`}
                     >
@@ -294,21 +464,7 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
           </motion.div>
         ))}
 
-        {isLoading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex gap-2"
-          >
-            <div className="w-6 h-6 rounded bg-primary/15 flex items-center justify-center shrink-0">
-              <Bot className="w-3.5 h-3.5 text-primary" />
-            </div>
-            <div className="bg-secondary/40 rounded-lg px-3 py-2">
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            </div>
-          </motion.div>
-        )}
-
+        {/* Removed standalone loader, now integrated into empty message */}
         {error && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -328,22 +484,33 @@ export default function AiChat({ factoryMachines, factorySimulation }: AiChatPro
             <textarea
               ref={inputRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask about your factory..."
               rows={1}
               className="flex-1 text-xs px-3 py-2 rounded bg-background/80 border border-border/50 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
             />
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || isLoading}
-              className="px-3 py-2 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
+            {isStreaming ? (
+              <button
+                onClick={stopGeneration}
+                className="px-3 py-2 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors flex items-center justify-center"
+                title="Stop generation"
+              >
+                <div className="w-2.5 h-2.5 bg-current rounded-[1px]" />
+              </button>
+            ) : (
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading}
+                className="px-3 py-2 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">
-            Powered by {modelLabel} via {config.customEndpoint ? "custom endpoint" : "OpenRouter"}
+            Powered by {modelLabel} via{" "}
+            {config.customEndpoint ? "custom endpoint" : "OpenRouter"}
           </p>
         </div>
       )}
