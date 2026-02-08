@@ -535,14 +535,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const { project } = get();
     if (!project) return;
 
-    const simInput: Record<string, { automated: boolean; machines: number; overclock: number }> = {};
+    const simInput: Record<string, { automated: boolean; machines: number; overclock: number }> = Object.create(null);
     for (const [key, item] of Object.entries(project.items)) {
       simInput[key] = { automated: item.automated, machines: item.machines, overclock: item.overclock };
     }
 
     const result = runSimulation(simInput);
 
-    const displayItems: Record<string, DisplayItemResult> = {};
+    const displayItems: Record<string, DisplayItemResult> = Object.create(null);
     for (const [key, node] of Object.entries(result.nodes)) {
       displayItems[key] = {
         outputPerMin: node.supplyRate,
@@ -570,7 +570,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       message: s.message,
     }));
 
-    const rawMaterials: Record<string, number> = {};
+    const rawMaterials: Record<string, number> = Object.create(null);
     for (const [key, node] of Object.entries(result.nodes)) {
       if (node.isRawResource && node.demandRate > 0) {
         rawMaterials[key] = node.demandRate;

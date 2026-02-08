@@ -27,7 +27,8 @@ export interface MachineInfo {
 
 // Build recipe compatibility maps from the RECIPES array
 function buildRecipeMap(): Record<string, string[]> {
-  const map: Record<string, string[]> = {};
+  // Use Object.create(null) to avoid prototype collisions (like "constructor")
+  const map: Record<string, string[]> = Object.create(null);
   for (const recipe of RECIPES) {
     const machine = recipe.machine;
     if (!map[machine]) map[machine] = [];
@@ -364,7 +365,7 @@ export const MACHINES: Record<MachineType, MachineInfo> = {
 
 /** Get all machines in a category */
 export function getMachinesByCategory(): Record<MachineCategory, MachineInfo[]> {
-  const groups: Record<string, MachineInfo[]> = {};
+  const groups: Record<string, MachineInfo[]> = Object.create(null);
   for (const machine of Object.values(MACHINES)) {
     if (!groups[machine.category]) groups[machine.category] = [];
     groups[machine.category].push(machine);

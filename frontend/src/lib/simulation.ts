@@ -99,7 +99,7 @@ export function calcInputPerMin(
 export function simulate(
   items: Record<string, SimulationInput>
 ): SimulationResult {
-  const nodes: Record<string, NodeResult> = {};
+  const nodes: Record<string, NodeResult> = Object.create(null);
   const automatedKeys = Object.keys(items).filter((k) => items[k].automated);
 
   // Step 1: Calculate supply rate for each automated item
@@ -276,8 +276,8 @@ function buildAdjacency(machines: MachineInstance[]): {
   upstream: Record<string, string[]>;
   downstream: Record<string, string[]>;
 } {
-  const upstream: Record<string, string[]> = {};
-  const downstream: Record<string, string[]> = {};
+  const upstream: Record<string, string[]> = Object.create(null);
+  const downstream: Record<string, string[]> = Object.create(null);
 
   for (const m of machines) {
     upstream[m.id] = [];
@@ -310,7 +310,7 @@ function topologicalSort(
   machines: MachineInstance[],
   upstream: Record<string, string[]>
 ): string[] {
-  const inDegree: Record<string, number> = {};
+  const inDegree: Record<string, number> = Object.create(null);
   for (const m of machines) {
     inDegree[m.id] = (upstream[m.id] ?? []).length;
   }
@@ -373,9 +373,9 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
   const { upstream, downstream } = buildAdjacency(machines);
   const sortedIds = topologicalSort(machines, upstream);
 
-  const nodes: Record<string, SimulationNode> = {};
+  const nodes: Record<string, SimulationNode> = Object.create(null);
   // Track what each machine produces and what's available on each output
-  const outputAvailable: Record<string, Record<number, { item: string; rate: number }>> = {};
+  const outputAvailable: Record<string, Record<number, { item: string; rate: number }>> = Object.create(null);
 
   // Initialize nodes
   for (const m of machines) {

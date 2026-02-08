@@ -1007,7 +1007,7 @@ export function getSortedItemKeys(): string[] {
 
 /** Get items grouped by category */
 export function getItemsByCategory(): Record<string, ItemInfo[]> {
-  const groups: Record<string, ItemInfo[]> = {};
+  const groups: Record<string, ItemInfo[]> = Object.create(null);
   for (const item of Object.values(ITEMS)) {
     if (!groups[item.category]) groups[item.category] = [];
     groups[item.category].push(item);
