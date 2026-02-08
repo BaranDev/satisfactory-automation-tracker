@@ -5,9 +5,12 @@ Fetches item images from satisfactory.wiki.gg individual item pages,
 extracts the infobox (pi-media) image, converts to optimized WebP,
 and uploads to RustFS/S3.
 
-Two modes:
+Modes:
   1. --test       Scrape a single item (default: Copper_Ore) to verify setup
-  2. (no flag)    Scrape all known items
+  2. --machines   Scrape all known machines only
+  3. --items-only Scrape all known items only
+  4. --discover   Discover unknown items from wiki and scrape them
+  5. (no flag)    Scrape all known items and machines
 
 Environment Variables:
     S3_ENDPOINT   - S3/RustFS endpoint URL
@@ -16,17 +19,27 @@ Environment Variables:
     S3_BUCKET     - Bucket name for assets (default: satisfactory-assets)
 
 Usage:
+
     # Test with a single item
     python scraper.py --test
 
     # Test with a specific item
     python scraper.py --test --item "Iron Plate"
 
-    # Scrape all items
+    # Scrape all items and machines
     python scraper.py
 
-    # Scrape all items, skip already uploaded
+    # Scrape all items and machines, skip already uploaded
     python scraper.py --skip-existing
+
+    # Scrape all machines only
+    python scraper.py --machines
+
+    # Scrape all items only
+    python scraper.py --items-only
+
+    # Scrape all items and machines, discover unknown items from wiki
+    python scraper.py --discover
 
     # Dry run (no upload)
     python scraper.py --dry-run
@@ -46,6 +59,9 @@ from PIL import Image
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ──────────────────────────────────────────────
 # Configuration
@@ -264,8 +280,9 @@ MACHINES = {
 
 
 # ──────────────────────────────────────────────
-# S3 / RustFS Client
+# S3 / Minio Client
 # ──────────────────────────────────────────────
+
 
 def get_s3_client():
     return boto3.client(
@@ -542,7 +559,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Don't actually upload to S3")
     parser.add_argument("--skip-existing", action="store_true", help="Skip items already in S3")
     parser.add_argument("--discover", action="store_true", help="Also discover items from wiki (slower)")
-    parser.add_argument("--machines", action="store_true", help="Scrape machine images instead of items")
+    parser.add_argument("--machines", action="store_true", help="Scrape machine images only (not items)")
+    parser.add_argument("--items-only", action="store_true", help="Scrape item images only (not machines)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -565,18 +583,30 @@ def main():
         items = {key: args.item}
         print(f"TEST MODE: Scraping '{args.item}' only")
     elif args.machines:
-        # Machine images mode - prefix keys with "machine_" for S3
+        # Machine images only - prefix keys with "machine_" for S3
         items = {f"machine_{k}": v for k, v in MACHINES.items()}
-        print(f"Scraping {len(items)} machine images")
-    else:
+        print(f"Scraping {len(items)} machine images only")
+    elif args.items_only:
+        # Items only (original behavior)
         items = dict(ITEMS)
         if args.discover:
             discovered = discover_items_from_wiki()
-            # Merge discovered into known items (known takes priority)
             for k, v in discovered.items():
                 if k not in items:
                     items[k] = v
-        print(f"Scraping {len(items)} items")
+        print(f"Scraping {len(items)} items only")
+    else:
+        # Default: scrape both items AND machines
+        items = dict(ITEMS)
+        if args.discover:
+            discovered = discover_items_from_wiki()
+            for k, v in discovered.items():
+                if k not in items:
+                    items[k] = v
+        # Add machines with prefix
+        machines = {f"machine_{k}": v for k, v in MACHINES.items()}
+        items.update(machines)
+        print(f"Scraping {len(items)} total ({len(ITEMS)} items + {len(MACHINES)} machines)")
 
     # Check existing keys
     existing_keys = set()
