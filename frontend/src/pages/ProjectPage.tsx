@@ -1,7 +1,14 @@
 import { useEffect, useState, useCallback, Suspense, lazy } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, ChevronLeft, ChevronRight, Layers, Package, Cpu } from "lucide-react";
+import {
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  Package,
+  Cpu,
+} from "lucide-react";
 import { useProjectStore } from "@/store/projectStore";
 import Header from "@/components/Header";
 import ItemGrid from "@/components/ItemGrid";
@@ -54,12 +61,15 @@ export default function ProjectPage() {
     }
   }, [projectId, initialized, loadProject]);
 
-  const handleAddMachine = useCallback((machineType: MachineType) => {
-    addMachine(machineType);
-  }, [addMachine]);
+  const handleAddMachine = useCallback(
+    (machineType: MachineType) => {
+      addMachine(machineType);
+    },
+    [addMachine],
+  );
 
   const selectedMachine = selectedMachineId
-    ? factoryMachines.find(m => m.id === selectedMachineId)
+    ? factoryMachines.find((m) => m.id === selectedMachineId)
     : null;
 
   if (isLoading && !project) {
@@ -105,7 +115,7 @@ export default function ProjectPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen overflow-hidden flex flex-col">
       <Header />
 
       {/* View mode toggle */}
@@ -202,7 +212,8 @@ export default function ProjectPage() {
                     {leftTab === "modules" && (
                       <div className="p-4 text-center">
                         <p className="text-xs text-muted-foreground">
-                          Select machines on canvas, then use "Create Module" to save reusable groups.
+                          Select machines on canvas, then use "Create Module" to
+                          save reusable groups.
                         </p>
                       </div>
                     )}
@@ -261,12 +272,14 @@ export default function ProjectPage() {
           </div>
 
           {/* Production Summary (canvas mode only) */}
-          {viewMode === "canvas" && factorySimulation && factoryMachines.length > 0 && (
-            <ProductionSummary
-              simulation={factorySimulation}
-              machineCount={factoryMachines.length}
-            />
-          )}
+          {viewMode === "canvas" &&
+            factorySimulation &&
+            factoryMachines.length > 0 && (
+              <ProductionSummary
+                simulation={factorySimulation}
+                machineCount={factoryMachines.length}
+              />
+            )}
         </motion.div>
 
         {/* Right Collapse Toggle */}
