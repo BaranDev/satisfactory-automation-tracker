@@ -10,8 +10,8 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:-changeme}
       S3_BUCKET: ${S3_BUCKET:-satisfactory-tracker}
       ASSETS_BUCKET: ${ASSETS_BUCKET:-satisfactory-assets}
-      ASSETS_BASE_URL: ${ASSETS_BASE_URL:-https://s3.cevdetbaran.com/satisfactory-assets}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://sap.cevdetbaran.com}
+      ASSETS_BASE_URL: ${ASSETS_BASE_URL:-http://localhost:9000/satisfactory-assets}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s

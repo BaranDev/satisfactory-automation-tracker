@@ -1,7 +1,7 @@
 import { useState, memo } from "react";
 import { cn } from "@/lib/utils";
 
-const ASSETS_BASE = "https://s3.cevdetbaran.com/satisfactory-assets";
+const ASSETS_BASE = import.meta.env.VITE_ASSETS_BASE_URL || "/api/assets";
 
 // Color palette based on item category
 const CATEGORY_COLORS: Record<string, string> = {
