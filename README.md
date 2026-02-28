@@ -1,4 +1,6 @@
 # Satisfactory Automation Tracker
+<img width="2508" height="1404" alt="image" src="https://github.com/user-attachments/assets/499738a3-bfa1-4a7a-aabf-3f9481d2e2a6" />
+
 
 Track automated items in your Satisfactory factory, simulate production rates, and get improvement suggestions. Share your project with friends via a simple URL, no accounts needed.
 
@@ -15,6 +17,9 @@ Track automated items in your Satisfactory factory, simulate production rates, a
 - **AI Assistant** - FICSIT AI for factory tips
 
 ---
+
+<img width="2508" height="1404" alt="image" src="https://github.com/user-attachments/assets/07b38115-6fa4-4513-ace3-4b545cf07262" />
+
 
 ## Tech Stack
 
