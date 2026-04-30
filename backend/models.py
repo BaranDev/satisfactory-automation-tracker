@@ -1,6 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, Any
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal, Optional
 
 
 class ItemData(BaseModel):
@@ -18,10 +17,13 @@ class ConnectionRef(BaseModel):
 
 class ConnectionPoint(BaseModel):
     slot: int
+    kind: Optional[Literal["item", "fluid"]] = None
     connectedTo: Optional[ConnectionRef] = None
     itemType: Optional[str] = None
     actualRate: float = 0
-    maxRate: float = 780
+    beltTier: Optional[str] = None
+    pipeTier: Optional[str] = None
+    maxRate: Optional[float] = None
 
 
 class MachineInstance(BaseModel):
@@ -29,9 +31,12 @@ class MachineInstance(BaseModel):
     machineType: str
     recipe: Optional[str] = None
     overclock: float = 1.0
-    position: dict[str, float] = {"x": 0, "y": 0}
-    inputs: list[ConnectionPoint] = []
-    outputs: list[ConnectionPoint] = []
+    position: dict[str, float] = Field(default_factory=lambda: {"x": 0, "y": 0})
+    extractionItem: Optional[str] = None
+    nodePurity: Optional[Literal["impure", "normal", "pure"]] = None
+    somersloops: int = 0
+    inputs: list[ConnectionPoint] = Field(default_factory=list)
+    outputs: list[ConnectionPoint] = Field(default_factory=list)
 
 
 class ProjectData(BaseModel):
@@ -40,14 +45,16 @@ class ProjectData(BaseModel):
     version: int = 1
     last_updated: str
     assets_base_url: Optional[str] = None
-    items: dict[str, ItemData] = {}
-    factory_machines: list[MachineInstance] = []
+    items: dict[str, ItemData] = Field(default_factory=dict)
+    factory_machines: list[MachineInstance] = Field(default_factory=list)
 
-    class Config:
-        extra = "allow"  # Allow additional fields
+    # Be lenient on unknown top-level fields to absorb future client schema
+    # extensions without breaking saved projects mid-upgrade. We still cap
+    # body size (config.MAX_BODY_BYTES) so this can't bloat unbounded.
+    model_config = ConfigDict(extra="allow")
 
 
 class ProjectUpdateRequest(BaseModel):
     project: ProjectData
-    force: bool = False  # If true, overwrite even on conflict
-    expected_version: Optional[int] = None  # For optimistic locking
+    force: bool = False
+    expected_version: Optional[int] = None
