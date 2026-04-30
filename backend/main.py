@@ -12,8 +12,14 @@ from routes import projects, assets
 
 
 # ─── Optional /health log silencer ───────────────────────────────
+# Uvicorn formats access logs as `(client, method, path, version, status)`
+# in `record.args`. Match the path slot directly so reformatting can't
+# silently disable the filter.
 class _SkipHealthFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        args = getattr(record, "args", None)
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            return args[2] != "/health"
         return "GET /health" not in record.getMessage()
 
 
@@ -40,22 +46,55 @@ async def _ratelimit_handler(_request: Request, _exc: RateLimitExceeded) -> Resp
 
 
 # ─── Body size cap ───────────────────────────────────────────────
+# Two layers:
+#   1. Reject early if Content-Length declares too much.
+#   2. For chunked transfer-encoding (no Content-Length), drain the
+#      stream ourselves with a running tally and abort once we exceed
+#      the cap. We then replace `request._receive` with a generator
+#      that replays the buffered body so downstream handlers behave
+#      normally.
 @app.middleware("http")
 async def _enforce_body_cap(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
+    cap = config.MAX_BODY_BYTES
     cl = request.headers.get("content-length")
     if cl is not None:
         try:
-            n = int(cl)
+            if int(cl) > cap:
+                return Response(
+                    content='{"detail":"Request body too large."}',
+                    media_type="application/json",
+                    status_code=413,
+                )
         except ValueError:
-            n = 0
-        if n > config.MAX_BODY_BYTES:
+            return Response(
+                content='{"detail":"Bad Content-Length."}',
+                media_type="application/json",
+                status_code=400,
+            )
+
+    # Read+buffer the body so chunked uploads also get capped.
+    body = b""
+    more_body = True
+    while more_body:
+        message = await request.receive()
+        if message["type"] != "http.request":
+            continue
+        chunk = message.get("body", b"") or b""
+        body += chunk
+        if len(body) > cap:
             return Response(
                 content='{"detail":"Request body too large."}',
                 media_type="application/json",
                 status_code=413,
             )
+        more_body = message.get("more_body", False)
+
+    async def _replay() -> dict:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request._receive = _replay  # type: ignore[attr-defined]
     return await call_next(request)
 
 

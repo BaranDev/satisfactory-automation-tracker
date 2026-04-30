@@ -109,12 +109,25 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
 ];
 
+const VALID_PROVIDERS = new Set<string>(PROVIDER_PRESETS.map(p => p.id));
+
 export function loadAIConfig(): AIConfig {
   try {
     const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (stored) {
       const cfg = JSON.parse(stored) as AIConfig;
-      if (cfg.provider && cfg.model) return cfg;
+      // Reject stored configs whose `provider` was removed in a refactor
+      // (e.g. the old `"anthropic"` literal). Otherwise the dropdown
+      // silently shows the wrong selection and the endpoint defaults
+      // wrong.
+      if (
+        typeof cfg?.provider === "string" &&
+        VALID_PROVIDERS.has(cfg.provider) &&
+        typeof cfg?.model === "string" &&
+        cfg.model.length > 0
+      ) {
+        return cfg;
+      }
     }
   } catch {
     // ignore

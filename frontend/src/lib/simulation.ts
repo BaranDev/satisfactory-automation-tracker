@@ -313,14 +313,43 @@ function topologicalSort(
     }
   }
 
+  const inSorted = new Set(sorted);
   const cycles: string[] = [];
   for (const m of machines) {
-    if (!sorted.includes(m.id)) {
+    if (!inSorted.has(m.id)) {
       sorted.push(m.id);
       cycles.push(m.id);
     }
   }
   return { sorted, cycles };
+}
+
+/** Build `recipe.inputs[i] → machine.inputs[slotIdx]` mapping.
+ *  Greeny upstream recipes don't guarantee an `[items, fluids]` ordering
+ *  matching our slot layout, and a recipe may have two same-kind inputs
+ *  (e.g. Foundry: iron_ore + coal). Match by item key first, then fall
+ *  back to the first unused slot of the same kind. Returns -1 if nothing
+ *  matches. */
+function mapRecipeIOToSlots(
+  io: { item: string; amount: number; type?: "item" | "fluid" }[],
+  slots: ConnectionPoint[],
+): number[] {
+  const used = new Set<number>();
+  return io.map(entry => {
+    const entryKind: "item" | "fluid" = entry.type ?? "item";
+    // First pass: exact item match
+    let idx = slots.findIndex(
+      (slot, i) =>
+        !used.has(i) && slot.kind === entryKind && slot.itemType === entry.item,
+    );
+    if (idx === -1) {
+      idx = slots.findIndex(
+        (slot, i) => !used.has(i) && slot.kind === entryKind,
+      );
+    }
+    if (idx !== -1) used.add(idx);
+    return idx;
+  });
 }
 
 function maxRateForConnection(conn: ConnectionPoint): number {
@@ -412,7 +441,9 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
     }
   }
 
-  // Cycle warnings
+  const cycleSet = new Set(cycles);
+  // Cycle warnings — and skip those nodes from the forward pass entirely
+  // so we don't pile a `disconnected`/`bottleneck` warning on top.
   for (const id of cycles) {
     nodes[id]?.warnings.push({
       type: "cycle",
@@ -424,6 +455,7 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
 
   // Forward pass
   for (const id of sortedIds) {
+    if (cycleSet.has(id)) continue;
     const machine = machineMap.get(id);
     if (!machine) continue;
     const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
@@ -475,6 +507,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
         continue;
       }
       const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
+      const inputSlotMap = mapRecipeIOToSlots(recipe.inputs, machine.inputs);
+      const outputSlotMap = mapRecipeIOToSlots(recipe.outputs, machine.outputs);
       const inputSlots: SimulationNode["inputSlots"] = [];
       let minSatisfaction = 1;
 
@@ -484,7 +518,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
         let available = 0;
         let source: string | "external" = "external";
 
-        const conn = machine.inputs[i];
+        const slotIdx = inputSlotMap[i];
+        const conn = slotIdx >= 0 ? machine.inputs[slotIdx] : undefined;
         if (conn?.connectedTo) {
           const srcOutput = outputAvailable[conn.connectedTo.machineId]?.[conn.connectedTo.slot];
           if (srcOutput) {
@@ -517,7 +552,11 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
         const ro = recipe.outputs[i];
         const produced = cyclesPerMin * ro.amount * minSatisfaction;
         outputSlots.push({ item: ro.item, produced, consumed: 0, surplus: produced, destinations: [] });
-        outputAvailable[id][i] = { item: ro.item, rate: produced };
+        // Index outputAvailable by the machine slot the recipe output maps
+        // to, not by recipe order — downstream connections reference the
+        // machine slot.
+        const slotIdx = outputSlotMap[i] >= 0 ? outputSlotMap[i] : i;
+        outputAvailable[id][slotIdx] = { item: ro.item, rate: produced };
       }
       node.outputSlots = outputSlots;
       continue;
@@ -528,6 +567,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
 
     const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
     const sloopMult = somersloopOutputMultiplier(somersloops, machineInfo.somersloopSlots);
+    const inputSlotMap = mapRecipeIOToSlots(recipe.inputs, machine.inputs);
+    const outputSlotMap = mapRecipeIOToSlots(recipe.outputs, machine.outputs);
 
     const inputSlots: SimulationNode["inputSlots"] = [];
     let minSatisfaction = 1;
@@ -538,7 +579,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       let available = 0;
       let source: string | "external" = "external";
 
-      const conn = machine.inputs[i];
+      const slotIdx = inputSlotMap[i];
+      const conn = slotIdx >= 0 ? machine.inputs[slotIdx] : undefined;
       if (conn?.connectedTo) {
         const srcOutput = outputAvailable[conn.connectedTo.machineId]?.[conn.connectedTo.slot];
         if (srcOutput) {
@@ -558,7 +600,7 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       } else {
         node.warnings.push({
           type: "disconnected",
-          message: `${machineInfo.label} input slot ${i} (${ri.item.replace(/_/g, " ")}) is not connected.`,
+          message: `${machineInfo.label} ${ri.type === "fluid" ? "fluid" : "item"} input (${ri.item.replace(/_/g, " ")}) is not connected.`,
           severity: "info",
           machineId: id,
         });
@@ -579,7 +621,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       const ro = recipe.outputs[i];
       const produced = cyclesPerMin * ro.amount * sloopMult * minSatisfaction;
       outputSlots.push({ item: ro.item, produced, consumed: 0, surplus: produced, destinations: [] });
-      outputAvailable[id][i] = { item: ro.item, rate: produced };
+      const slotIdx = outputSlotMap[i] >= 0 ? outputSlotMap[i] : i;
+      outputAvailable[id][slotIdx] = { item: ro.item, rate: produced };
     }
     node.outputSlots = outputSlots;
 
@@ -602,27 +645,39 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
   }
 
   // Second pass: track consumption + destination links on output slots.
+  // Resolve which recipe-input applies to each connected slot via the
+  // same kind/itemType matching used during the forward pass — never
+  // by positional `recipe.inputs[inIdx]`, which doesn't match for
+  // mixed item+fluid machines.
   for (const machine of machines) {
+    const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
     machine.inputs.forEach((input, inIdx) => {
       if (!input.connectedTo) return;
       const srcNode = nodes[input.connectedTo.machineId];
       if (!srcNode) return;
-      const slotIdx = input.connectedTo.slot;
-      const outputSlot = srcNode.outputSlots[slotIdx];
-      if (!outputSlot) return;
+      // Find the right output slot on the source by the slot index it
+      // claims to feed. Then resolve which recipe-output produced it
+      // (matched by item key) so `outputSlots[]` order stays in sync
+      // with `outputAvailable[]`.
+      const srcOutputSlot = srcNode.outputSlots.find(os => os.item === input.itemType)
+        ?? srcNode.outputSlots[input.connectedTo.slot];
+      if (!srcOutputSlot) return;
+
       const node = nodes[machine.id];
       const sat = node?.inputSatisfaction ?? 1;
-      const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
       if (recipe) {
-        const ri = recipe.inputs[inIdx];
+        // Match by item key first, then by kind+slot fallback.
+        const ri =
+          recipe.inputs.find(r => r.item === input.itemType) ??
+          recipe.inputs[inIdx];
         if (ri) {
           const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
           const consumed = cyclesPerMin * ri.amount * sat;
-          outputSlot.consumed += consumed;
-          outputSlot.surplus = outputSlot.produced - outputSlot.consumed;
+          srcOutputSlot.consumed += consumed;
+          srcOutputSlot.surplus = srcOutputSlot.produced - srcOutputSlot.consumed;
         }
       }
-      outputSlot.destinations.push(machine.id);
+      srcOutputSlot.destinations.push(machine.id);
     });
   }
 

@@ -8,12 +8,15 @@ the server-side SECRET_KEY. Verifying just recomputes and uses
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 from typing import Optional
 
 from fastapi import Header, HTTPException
 
 import config
+
+logger = logging.getLogger("auth")
 
 
 def _derive(project_id: str) -> bytes:
@@ -52,6 +55,10 @@ def require_write_token(
     if token is None:
         if config.REQUIRE_WRITE_TOKEN:
             raise HTTPException(status_code=401, detail="Missing write token")
+        # Rollout signal: count how often legacy clients arrive without
+        # a token. Grep `auth.legacy_no_token` in logs before flipping
+        # REQUIRE_WRITE_TOKEN=true.
+        logger.warning("auth.legacy_no_token project_id=%s", project_id)
         return
 
     if not verify_write_token(project_id, token):
