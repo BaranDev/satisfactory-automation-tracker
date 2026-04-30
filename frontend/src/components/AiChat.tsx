@@ -28,9 +28,11 @@ import AISettings, {
   loadAIConfig,
   saveAIConfig,
   getEndpointForConfig,
+  shouldSendOpenRouterHeaders,
   type AIConfig,
 } from "./AISettings";
-import type { FactorySimulationResult, MachineInstance } from "@/types/factory";
+import { MACHINES } from "@/data/machines";
+import type { MachineType, FactorySimulationResult, MachineInstance } from "@/types/factory";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -57,8 +59,48 @@ export default function AiChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const addMachine = useProjectStore(s => s.addMachine);
+  const updateMachineRecipe = useProjectStore(s => s.updateMachineRecipe);
+  const updateMachineOverclock = useProjectStore(s => s.updateMachineOverclock);
+
   const hasKey = config.apiKey.length > 0;
   const projectId = project?.project_id;
+
+  const applySuggestion = useCallback(
+    (s: AISuggestion) => {
+      switch (s.type) {
+        case "add_machine": {
+          const machineType = s.attributes.machine as MachineType | undefined;
+          const recipeId = s.attributes.recipe;
+          const count = parseInt(s.attributes.count ?? "1");
+          if (!machineType || !MACHINES[machineType]) return;
+          for (let i = 0; i < count; i++) {
+            const id = addMachine(machineType);
+            if (recipeId) updateMachineRecipe(id, recipeId);
+          }
+          break;
+        }
+        case "change_overclock": {
+          const id = s.attributes.machineId;
+          const oc = parseFloat(s.attributes.overclock ?? "1");
+          if (!id || isNaN(oc)) return;
+          updateMachineOverclock(id, Math.max(0.01, Math.min(2.5, oc)));
+          break;
+        }
+        case "fix_recipe": {
+          const id = s.attributes.machineId;
+          const recipeId = s.attributes.recipe;
+          if (!id) return;
+          updateMachineRecipe(id, recipeId ?? null);
+          break;
+        }
+        default:
+          // Unknown suggestion shape — fall through silently.
+          break;
+      }
+    },
+    [addMachine, updateMachineRecipe, updateMachineOverclock],
+  );
 
   // Load chat history from localStorage when project changes
   useEffect(() => {
@@ -166,20 +208,22 @@ export default function AiChat({
         abortControllerRef.current = new AbortController();
         const endpoint = getEndpointForConfig(config);
 
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+        if (shouldSendOpenRouterHeaders(config)) {
+          headers["HTTP-Referer"] = window.location.origin;
+          headers["X-Title"] = "FICSIT Automation Tracker";
+        }
+
         const response = await fetch(endpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.apiKey}`,
-            "HTTP-Referer": window.location.origin,
-            "X-Title": "FICSIT Automation Tracker",
-          },
+          headers,
           body: JSON.stringify({
             model: config.model,
             messages: apiMessages,
             max_tokens: 2048,
             temperature: 0.7,
-            stream: true, // Enable streaming
+            stream: true,
           }),
           signal: abortControllerRef.current.signal,
         });
@@ -442,10 +486,7 @@ export default function AiChat({
                   {msg.suggestions.map((s, j) => (
                     <button
                       key={j}
-                      onClick={() => {
-                        // TODO: Implement suggestion actions
-                        console.log("Processing suggestion:", s);
-                      }}
+                      onClick={() => applySuggestion(s)}
                       className="w-full text-left text-[10px] px-2.5 py-1.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5"
                       title={`${s.type}: ${JSON.stringify(s.attributes)}`}
                     >
