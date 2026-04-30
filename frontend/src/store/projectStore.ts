@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { ITEMS, RECIPES } from "@/data/recipes";
-import { MACHINES } from "@/data/machines";
+import { MACHINES, DEFAULT_EXTRACTION_ITEM, BELT_LIMITS, PIPE_LIMITS } from "@/data/machines";
 import {
   simulate as runSimulation,
   simulateFactory,
@@ -15,6 +15,7 @@ import type {
   FactoryModule,
   FactorySimulationResult,
   ConnectionPoint,
+  NodePurity,
 } from "@/types/factory";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -95,6 +96,9 @@ interface ProjectStore {
   removeMachine: (machineId: string) => void;
   updateMachineRecipe: (machineId: string, recipeId: string | null) => void;
   updateMachineOverclock: (machineId: string, overclock: number) => void;
+  updateMachineExtractionItem: (machineId: string, item: string | null) => void;
+  updateMachineNodePurity: (machineId: string, purity: NodePurity) => void;
+  updateMachineSomersloops: (machineId: string, count: number) => void;
   updateMachinePosition: (machineId: string, position: { x: number; y: number }) => void;
   setFactoryMachines: (machines: MachineInstance[]) => void;
   selectMachine: (machineId: string | null) => void;
@@ -157,18 +161,62 @@ function buildFullItems(
   return result;
 }
 
-function makeEmptyConnectionPoints(machineType: MachineType): { inputs: ConnectionPoint[]; outputs: ConnectionPoint[] } {
+/** Build empty input/output ConnectionPoints with proper item/fluid kinds.
+ *  Solid item slots come first (slots 0..inputSlots-1), then fluid slots. */
+export function makeEmptyConnectionPoints(machineType: MachineType): {
+  inputs: ConnectionPoint[];
+  outputs: ConnectionPoint[];
+} {
   const info = MACHINES[machineType];
   if (!info) return { inputs: [], outputs: [] };
 
-  const inputs: ConnectionPoint[] = Array.from(
-    { length: info.inputSlots + info.fluidInputs },
-    (_, i) => ({ slot: i, connectedTo: null, itemType: null, actualRate: 0, maxRate: 780 }),
-  );
-  const outputs: ConnectionPoint[] = Array.from(
-    { length: info.outputSlots + info.fluidOutputs },
-    (_, i) => ({ slot: i, connectedTo: null, itemType: null, actualRate: 0, maxRate: 780 }),
-  );
+  const inputs: ConnectionPoint[] = [];
+  for (let i = 0; i < info.inputSlots; i++) {
+    inputs.push({
+      slot: inputs.length,
+      kind: "item",
+      connectedTo: null,
+      itemType: null,
+      actualRate: 0,
+      beltTier: "belt_mk1",
+      maxRate: BELT_LIMITS.belt_mk1,
+    });
+  }
+  for (let i = 0; i < info.fluidInputs; i++) {
+    inputs.push({
+      slot: inputs.length,
+      kind: "fluid",
+      connectedTo: null,
+      itemType: null,
+      actualRate: 0,
+      pipeTier: "pipe_mk1",
+      maxRate: PIPE_LIMITS.pipe_mk1,
+    });
+  }
+
+  const outputs: ConnectionPoint[] = [];
+  for (let i = 0; i < info.outputSlots; i++) {
+    outputs.push({
+      slot: outputs.length,
+      kind: "item",
+      connectedTo: null,
+      itemType: null,
+      actualRate: 0,
+      beltTier: "belt_mk1",
+      maxRate: BELT_LIMITS.belt_mk1,
+    });
+  }
+  for (let i = 0; i < info.fluidOutputs; i++) {
+    outputs.push({
+      slot: outputs.length,
+      kind: "fluid",
+      connectedTo: null,
+      itemType: null,
+      actualRate: 0,
+      pipeTier: "pipe_mk1",
+      maxRate: PIPE_LIMITS.pipe_mk1,
+    });
+  }
 
   return { inputs, outputs };
 }
@@ -370,13 +418,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const id = nanoid(8);
     const info = MACHINES[machineType];
     const { inputs, outputs } = makeEmptyConnectionPoints(machineType);
+    const isExtractor = info?.category === "extraction";
 
     const newMachine: MachineInstance = {
       id,
       machineType,
-      recipe: info?.compatibleRecipes[0] ?? null,
+      recipe: isExtractor ? null : (info?.compatibleRecipes[0] ?? null),
       overclock: 1.0,
       position: position ?? { x: Math.random() * 400 + 100, y: Math.random() * 300 + 100 },
+      extractionItem: isExtractor ? (DEFAULT_EXTRACTION_ITEM[machineType] ?? null) : undefined,
+      nodePurity: isExtractor ? "normal" : undefined,
+      somersloops: 0,
       inputs,
       outputs,
     };
@@ -389,6 +441,36 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ factorySimulation: result });
 
     return id;
+  },
+
+  updateMachineExtractionItem: (machineId: string, item: string | null) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m =>
+      m.id === machineId ? { ...m, extractionItem: item } : m,
+    );
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+    set({ factorySimulation: simulateFactory(updated) });
+  },
+
+  updateMachineNodePurity: (machineId: string, purity: NodePurity) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m =>
+      m.id === machineId ? { ...m, nodePurity: purity } : m,
+    );
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+    set({ factorySimulation: simulateFactory(updated) });
+  },
+
+  updateMachineSomersloops: (machineId: string, count: number) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m => {
+      if (m.id !== machineId) return m;
+      const info = MACHINES[m.machineType];
+      const max = info?.somersloopSlots ?? 0;
+      return { ...m, somersloops: Math.max(0, Math.min(max, count)) };
+    });
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+    set({ factorySimulation: simulateFactory(updated) });
   },
 
   removeMachine: (machineId: string) => {

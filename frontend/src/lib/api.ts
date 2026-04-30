@@ -1,7 +1,36 @@
-// API client for Satisfactory Automation Tracker backend
-// All calls go through /api/* which nginx proxies to the backend container
+// API client for Satisfactory Automation Tracker backend.
+// All calls go through /api/* which nginx proxies to the backend container.
 
 const API_BASE = "/api";
+
+// ─── Write-token storage ─────────────────────────────────────────
+// One token per project_id is required to mutate it. Tokens are
+// returned once on POST /project; we cache them in localStorage so
+// subsequent PUTs from the same browser succeed.
+
+const WRITE_TOKEN_KEY = "sap-write-tokens";
+
+function loadTokens(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(WRITE_TOKEN_KEY) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function saveTokens(map: Record<string, string>): void {
+  localStorage.setItem(WRITE_TOKEN_KEY, JSON.stringify(map));
+}
+
+export function setWriteToken(projectId: string, token: string): void {
+  const map = loadTokens();
+  map[projectId] = token;
+  saveTokens(map);
+}
+
+export function getWriteToken(projectId: string): string | null {
+  return loadTokens()[projectId] ?? null;
+}
 
 export interface ProjectData {
   project_id: string;
@@ -66,14 +95,18 @@ async function request<T>(
   return resp.json() as Promise<T>;
 }
 
-/** Create a new project */
+/** Create a new project. Caches the returned write token in localStorage. */
 export async function createProject(
-  name: string = "New Project"
+  name: string = "New Project",
 ): Promise<ProjectData> {
-  return request<ProjectData>("/project", {
+  const data = await request<ProjectData & { write_token?: string }>("/project", {
     method: "POST",
     body: JSON.stringify({ name }),
   });
+  if (data.write_token) setWriteToken(data.project_id, data.write_token);
+  const { write_token: _omit, ...rest } = data;
+  void _omit;
+  return rest;
 }
 
 /** Fetch project from cloud (Pull) */
@@ -104,15 +137,20 @@ export async function checkCloudVersion(
   }
 }
 
-/** Push project to cloud */
+/** Push project to cloud. Sends the cached write-token if we have one. */
 export async function updateProject(
   projectId: string,
   project: ProjectData,
-  options: { force?: boolean; expectedVersion?: number } = {}
+  options: { force?: boolean; expectedVersion?: number } = {},
 ): Promise<PushResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getWriteToken(projectId);
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   try {
     return await request<PushResponse>(`/project/${projectId}`, {
       method: "PUT",
+      headers,
       body: JSON.stringify({
         project,
         force: options.force ?? false,

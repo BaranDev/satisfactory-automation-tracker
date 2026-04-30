@@ -43,6 +43,9 @@ export default function ProjectPage() {
     removeMachine,
     updateMachineRecipe,
     updateMachineOverclock,
+    updateMachineExtractionItem,
+    updateMachineNodePurity,
+    updateMachineSomersloops,
     setFactoryMachines,
     setFactorySimulation,
   } = useProjectStore();
@@ -314,6 +317,9 @@ export default function ProjectPage() {
                   onClose={() => selectMachine(null)}
                   onRecipeChange={updateMachineRecipe}
                   onOverclockChange={updateMachineOverclock}
+                  onExtractionItemChange={updateMachineExtractionItem}
+                  onNodePurityChange={updateMachineNodePurity}
+                  onSomersloopsChange={updateMachineSomersloops}
                   onDelete={removeMachine}
                 />
               ) : (
