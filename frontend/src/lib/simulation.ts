@@ -7,7 +7,15 @@
 // checks belt/pipe limits, and generates improvement suggestions.
 
 import { RECIPES, ITEMS, getRecipeForItem, type Recipe } from "@/data/recipes";
-import { MACHINES, BELT_LIMITS, calcPowerAtOverclock } from "@/data/machines";
+import {
+  MACHINES,
+  BELT_LIMITS,
+  PIPE_LIMITS,
+  NODE_PURITY,
+  MINER_BASE_RATES,
+  calcPowerAtOverclock,
+  somersloopOutputMultiplier,
+} from "@/data/machines";
 import type {
   MachineInstance,
   ConnectionPoint,
@@ -21,7 +29,6 @@ import type {
 // LEGACY ITEM-BASED SIMULATION (backward compatible)
 // ═══════════════════════════════════════════════════════════════
 
-/** Return the full list of recipes */
 export function getRecipes(): Recipe[] {
   return RECIPES;
 }
@@ -65,44 +72,32 @@ export interface SimulationResult {
   totalItems: number;
 }
 
-/**
- * Calculate output per minute for a single recipe+machine setup.
- */
 export function calcOutputPerMin(
   recipe: Recipe,
   machines: number,
   overclock: number,
-  outputIndex: number = 0
+  outputIndex: number = 0,
 ): number {
   const cyclesPerMin = (60 / recipe.craft_time) * overclock;
   const outputPerMachine = cyclesPerMin * recipe.outputs[outputIndex].amount;
   return outputPerMachine * machines;
 }
 
-/**
- * Calculate input consumption per minute for a recipe+machine setup.
- */
 export function calcInputPerMin(
   recipe: Recipe,
   machines: number,
   overclock: number,
-  inputIndex: number
+  inputIndex: number,
 ): number {
   const cyclesPerMin = (60 / recipe.craft_time) * overclock;
   const inputPerMachine = cyclesPerMin * recipe.inputs[inputIndex].amount;
   return inputPerMachine * machines;
 }
 
-/**
- * Run full production simulation on the given item states (legacy).
- */
-export function simulate(
-  items: Record<string, SimulationInput>
-): SimulationResult {
+export function simulate(items: Record<string, SimulationInput>): SimulationResult {
   const nodes: Record<string, NodeResult> = Object.create(null);
-  const automatedKeys = Object.keys(items).filter((k) => items[k].automated);
+  const automatedKeys = Object.keys(items).filter(k => items[k].automated);
 
-  // Step 1: Calculate supply rate for each automated item
   for (const key of automatedKeys) {
     const item = items[key];
     const recipe = getRecipeForItem(key);
@@ -131,17 +126,14 @@ export function simulate(
     };
   }
 
-  // Step 2: Calculate demand rate for each item based on downstream consumers
   for (const key of automatedKeys) {
     const recipe = nodes[key]?.recipe;
     if (!recipe) continue;
-
     const item = items[key];
     const cyclesPerMin = (60 / recipe.craft_time) * item.overclock;
 
     for (const input of recipe.inputs) {
       const inputDemand = cyclesPerMin * input.amount * item.machines;
-
       if (nodes[input.item]) {
         nodes[input.item].demandRate += inputDemand;
       } else {
@@ -163,7 +155,6 @@ export function simulate(
     }
   }
 
-  // Step 3: Calculate surplus and ratio
   for (const node of Object.values(nodes)) {
     if (node.demandRate > 0) {
       node.surplus = node.supplyRate - node.demandRate;
@@ -176,13 +167,11 @@ export function simulate(
     }
   }
 
-  // Step 4: Sort bottlenecks by severity
   const bottlenecks = Object.values(nodes)
-    .filter((n) => n.isBottleneck)
+    .filter(n => n.isBottleneck)
     .sort((a, b) => a.ratio - b.ratio);
 
-  // Step 5: Generate suggestions
-  const suggestions = generateSuggestions(nodes, items);
+  const suggestions = generateSuggestions(nodes);
 
   return {
     nodes,
@@ -193,10 +182,7 @@ export function simulate(
   };
 }
 
-function generateSuggestions(
-  nodes: Record<string, NodeResult>,
-  items: Record<string, SimulationInput>
-): Suggestion[] {
+function generateSuggestions(nodes: Record<string, NodeResult>): Suggestion[] {
   const suggestions: Suggestion[] = [];
 
   for (const node of Object.values(nodes)) {
@@ -268,10 +254,6 @@ function generateSuggestions(
 // NEW GRAPH-BASED MACHINE SIMULATION
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Build an adjacency map from machine connections.
- * Returns { machineId → [upstream machineIds] } and { machineId → [downstream machineIds] }
- */
 function buildAdjacency(machines: MachineInstance[]): {
   upstream: Record<string, string[]>;
   downstream: Record<string, string[]>;
@@ -288,13 +270,9 @@ function buildAdjacency(machines: MachineInstance[]): {
     for (const input of m.inputs) {
       if (input.connectedTo) {
         const srcId = input.connectedTo.machineId;
-        if (!upstream[m.id].includes(srcId)) {
-          upstream[m.id].push(srcId);
-        }
+        if (!upstream[m.id].includes(srcId)) upstream[m.id].push(srcId);
         if (!downstream[srcId]) downstream[srcId] = [];
-        if (!downstream[srcId].includes(m.id)) {
-          downstream[srcId].push(m.id);
-        }
+        if (!downstream[srcId].includes(m.id)) downstream[srcId].push(m.id);
       }
     }
   }
@@ -302,23 +280,20 @@ function buildAdjacency(machines: MachineInstance[]): {
   return { upstream, downstream };
 }
 
-/**
- * Topological sort of machines (Kahn's algorithm).
- * Machines with no upstream dependencies come first.
- */
+interface TopoResult {
+  sorted: string[];
+  cycles: string[];   // ids that participate in a cycle
+}
+
 function topologicalSort(
   machines: MachineInstance[],
-  upstream: Record<string, string[]>
-): string[] {
+  upstream: Record<string, string[]>,
+): TopoResult {
   const inDegree: Record<string, number> = Object.create(null);
-  for (const m of machines) {
-    inDegree[m.id] = (upstream[m.id] ?? []).length;
-  }
+  for (const m of machines) inDegree[m.id] = (upstream[m.id] ?? []).length;
 
   const queue: string[] = [];
-  for (const m of machines) {
-    if (inDegree[m.id] === 0) queue.push(m.id);
-  }
+  for (const m of machines) if (inDegree[m.id] === 0) queue.push(m.id);
 
   const sorted: string[] = [];
   const machineMap = new Map(machines.map(m => [m.id, m]));
@@ -326,40 +301,58 @@ function topologicalSort(
   while (queue.length > 0) {
     const id = queue.shift()!;
     sorted.push(id);
-
     const machine = machineMap.get(id);
     if (!machine) continue;
-
-    // For each output connection, reduce downstream inDegree
     for (const output of machine.outputs) {
       if (output.connectedTo) {
         const downId = output.connectedTo.machineId;
+        if (inDegree[downId] === undefined) continue;
         inDegree[downId]--;
-        if (inDegree[downId] === 0) {
-          queue.push(downId);
-        }
+        if (inDegree[downId] === 0) queue.push(downId);
       }
     }
   }
 
-  // If we didn't sort all machines, there's a cycle — add remaining
+  const cycles: string[] = [];
   for (const m of machines) {
     if (!sorted.includes(m.id)) {
       sorted.push(m.id);
+      cycles.push(m.id);
     }
   }
-
-  return sorted;
+  return { sorted, cycles };
 }
 
-/**
- * Run graph-based factory simulation on placed machines.
- */
+function maxRateForConnection(conn: ConnectionPoint): number {
+  if (conn.kind === "fluid") {
+    if (conn.pipeTier) return PIPE_LIMITS[conn.pipeTier];
+    return conn.maxRate ?? PIPE_LIMITS.pipe_mk1;
+  }
+  if (conn.beltTier) return BELT_LIMITS[conn.beltTier];
+  return conn.maxRate ?? BELT_LIMITS.belt_mk1;
+}
+
+function extractorRate(machine: MachineInstance): number {
+  const purity = machine.nodePurity ?? "normal";
+  const base = MINER_BASE_RATES[machine.machineType];
+  if (typeof base === "number") {
+    return base * NODE_PURITY[purity] * machine.overclock;
+  }
+  if (machine.machineType === "water_extractor") return 120 * machine.overclock;
+  if (machine.machineType === "oil_extractor") return 120 * NODE_PURITY[purity] * machine.overclock;
+  if (machine.machineType === "resource_well_pressurizer") {
+    return 60 * NODE_PURITY[purity] * machine.overclock;
+  }
+  return 60 * machine.overclock;
+}
+
 export function simulateFactory(machines: MachineInstance[]): FactorySimulationResult {
   if (machines.length === 0) {
     return {
       nodes: {},
       totalPower: 0,
+      totalConsumption: 0,
+      totalGeneration: 0,
       totalItems: {},
       externalInputs: [],
       finalOutputs: [],
@@ -370,16 +363,15 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
   }
 
   const machineMap = new Map(machines.map(m => [m.id, m]));
-  const { upstream, downstream } = buildAdjacency(machines);
-  const sortedIds = topologicalSort(machines, upstream);
+  const { upstream } = buildAdjacency(machines);
+  const { sorted: sortedIds, cycles } = topologicalSort(machines, upstream);
 
   const nodes: Record<string, SimulationNode> = Object.create(null);
-  // Track what each machine produces and what's available on each output
   const outputAvailable: Record<string, Record<number, { item: string; rate: number }>> = Object.create(null);
 
-  // Initialize nodes
+  // Init nodes
   for (const m of machines) {
-    const recipe = m.recipe ? RECIPES.find(r => r.id === m.recipe) : null;
+    const recipe = m.recipe ? RECIPES.find(r => r.id === m.recipe) ?? null : null;
     const machineInfo = MACHINES[m.machineType];
 
     nodes[m.id] = {
@@ -393,217 +385,257 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       powerDraw: 0,
       warnings: [],
     };
-
     outputAvailable[m.id] = {};
 
-    // No recipe configured
-    if (!recipe && machineInfo && machineInfo.category !== 'extraction' && machineInfo.category !== 'power') {
+    if (!machineInfo) continue;
+
+    if (machineInfo.category === "extraction" && !m.extractionItem) {
       nodes[m.id].warnings.push({
-        type: 'no_recipe',
+        type: "no_resource",
+        message: `${machineInfo.label} has no resource selected.`,
+        severity: "error",
+        machineId: m.id,
+      });
+    }
+
+    if (
+      !recipe &&
+      machineInfo.category !== "extraction" &&
+      machineInfo.category !== "power"
+    ) {
+      nodes[m.id].warnings.push({
+        type: "no_recipe",
         message: `${machineInfo.label} has no recipe selected.`,
-        severity: 'error',
+        severity: "error",
         machineId: m.id,
       });
     }
   }
 
-  // Forward pass: traverse in topological order
+  // Cycle warnings
+  for (const id of cycles) {
+    nodes[id]?.warnings.push({
+      type: "cycle",
+      message: "Machine is part of a feedback loop — outputs may be inaccurate.",
+      severity: "error",
+      machineId: id,
+    });
+  }
+
+  // Forward pass
   for (const id of sortedIds) {
     const machine = machineMap.get(id);
     if (!machine) continue;
-
     const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
     const machineInfo = MACHINES[machine.machineType];
     const node = nodes[id];
-
     if (!machineInfo) continue;
+    const somersloops = machine.somersloops ?? 0;
 
-    // Handle extraction machines (miners, water extractors, etc.)
-    if (machineInfo.category === 'extraction') {
-      // Miners output based on their base rate * overclock
-      const baseRate = machine.machineType === 'miner_mk1' ? 60
-        : machine.machineType === 'miner_mk2' ? 120
-        : machine.machineType === 'miner_mk3' ? 240
-        : machine.machineType === 'water_extractor' ? 120
-        : machine.machineType === 'oil_extractor' ? 120
-        : 60;
+    // ─── Extraction ────────────────────────────────
+    if (machineInfo.category === "extraction") {
+      const outputItem = machine.extractionItem ?? null;
+      if (!outputItem) {
+        node.theoreticalOutput = 0;
+        node.actualOutput = 0;
+        node.outputSlots = [];
+        node.powerDraw = 0;
+        continue;
+      }
 
-      const outputRate = baseRate * machine.overclock;
-      node.theoreticalOutput = outputRate;
-      node.actualOutput = outputRate;
+      const rate = extractorRate(machine);
+      node.theoreticalOutput = rate;
+      node.actualOutput = rate;
       node.inputSatisfaction = 1;
-
-      // Determine output item from first connected output
-      const outputItem = machine.outputs[0]?.itemType ?? 'unknown';
       node.outputSlots = [{
         item: outputItem,
-        produced: outputRate,
+        produced: rate,
         consumed: 0,
-        surplus: outputRate,
+        surplus: rate,
         destinations: [],
       }];
+      outputAvailable[id][0] = { item: outputItem, rate };
 
-      outputAvailable[id][0] = { item: outputItem, rate: outputRate };
-
-      // Power
       node.powerDraw = calcPowerAtOverclock(
         Math.abs(machineInfo.basePower),
         machineInfo.powerExponent,
-        machine.overclock
+        machine.overclock,
+        0, 0,                         // extractors do not amp
       );
       continue;
     }
 
-    // Handle power generators
-    if (machineInfo.category === 'power') {
-      node.powerDraw = machineInfo.basePower; // negative = generates
+    // ─── Power generators (with optional fuel recipe) ────────────
+    if (machineInfo.category === "power") {
+      const baseGeneration = machineInfo.basePower; // negative
+      if (!recipe) {
+        node.powerDraw = baseGeneration;
+        node.theoreticalOutput = Math.abs(baseGeneration);
+        node.actualOutput = Math.abs(baseGeneration);
+        continue;
+      }
+      const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
+      const inputSlots: SimulationNode["inputSlots"] = [];
+      let minSatisfaction = 1;
+
+      for (let i = 0; i < recipe.inputs.length; i++) {
+        const ri = recipe.inputs[i];
+        const needed = cyclesPerMin * ri.amount;
+        let available = 0;
+        let source: string | "external" = "external";
+
+        const conn = machine.inputs[i];
+        if (conn?.connectedTo) {
+          const srcOutput = outputAvailable[conn.connectedTo.machineId]?.[conn.connectedTo.slot];
+          if (srcOutput) {
+            available = srcOutput.rate;
+            source = conn.connectedTo.machineId;
+            const limit = maxRateForConnection(conn);
+            if (srcOutput.rate > limit) {
+              available = limit;
+              node.warnings.push({
+                type: conn.kind === "fluid" ? "pipe_limit" : "belt_limit",
+                message: `${conn.kind === "fluid" ? "Pipe" : "Belt"} into ${machineInfo.label} is saturated (${limit}/min).`,
+                severity: "warning",
+                machineId: id,
+              });
+            }
+          }
+        }
+        const sat = needed > 0 ? Math.min(1, available / needed) : 1;
+        if (sat < minSatisfaction) minSatisfaction = sat;
+        inputSlots.push({ item: ri.item, needed, available, source });
+      }
+      node.inputSatisfaction = minSatisfaction;
+      node.inputSlots = inputSlots;
+      node.powerDraw = baseGeneration * minSatisfaction;
+      node.theoreticalOutput = Math.abs(baseGeneration);
+      node.actualOutput = Math.abs(node.powerDraw);
+
+      const outputSlots: SimulationNode["outputSlots"] = [];
+      for (let i = 0; i < recipe.outputs.length; i++) {
+        const ro = recipe.outputs[i];
+        const produced = cyclesPerMin * ro.amount * minSatisfaction;
+        outputSlots.push({ item: ro.item, produced, consumed: 0, surplus: produced, destinations: [] });
+        outputAvailable[id][i] = { item: ro.item, rate: produced };
+      }
+      node.outputSlots = outputSlots;
       continue;
     }
 
-    // Production machine with recipe
+    // ─── Production / refining / smelting ──────────────────
     if (!recipe) continue;
 
     const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
+    const sloopMult = somersloopOutputMultiplier(somersloops, machineInfo.somersloopSlots);
 
-    // Calculate theoretical output
-    node.theoreticalOutput = cyclesPerMin * (recipe.outputs[0]?.amount ?? 0);
-
-    // Determine input satisfaction
+    const inputSlots: SimulationNode["inputSlots"] = [];
     let minSatisfaction = 1;
-    const inputSlots: SimulationNode['inputSlots'] = [];
 
     for (let i = 0; i < recipe.inputs.length; i++) {
-      const recipeInput = recipe.inputs[i];
-      const needed = cyclesPerMin * recipeInput.amount;
+      const ri = recipe.inputs[i];
+      const needed = cyclesPerMin * ri.amount;
       let available = 0;
-      let source: string | 'external' = 'external';
+      let source: string | "external" = "external";
 
-      // Check if this input slot has a connection
-      const conn: ConnectionPoint | undefined = machine.inputs[i];
+      const conn = machine.inputs[i];
       if (conn?.connectedTo) {
-        const srcId = conn.connectedTo.machineId;
-        const srcSlot = conn.connectedTo.slot;
-        const srcOutput = outputAvailable[srcId]?.[srcSlot];
+        const srcOutput = outputAvailable[conn.connectedTo.machineId]?.[conn.connectedTo.slot];
         if (srcOutput) {
           available = srcOutput.rate;
-          source = srcId;
-
-          // Consume from the source's available output
-          // Check belt limit
-          const beltLimit = conn.maxRate || BELT_LIMITS.belt_mk5;
-          available = Math.min(available, beltLimit);
-
-          if (available < needed && srcOutput.rate >= needed) {
+          source = conn.connectedTo.machineId;
+          const limit = maxRateForConnection(conn);
+          if (srcOutput.rate > limit) {
+            available = limit;
             node.warnings.push({
-              type: 'belt_limit',
-              message: `Belt to ${machineInfo.label} for ${recipeInput.item.replace(/_/g, ' ')} is saturated (${beltLimit}/min limit).`,
-              severity: 'warning',
+              type: conn.kind === "fluid" ? "pipe_limit" : "belt_limit",
+              message: `${conn.kind === "fluid" ? "Pipe" : "Belt"} into ${machineInfo.label} is saturated (${limit}/min).`,
+              severity: "warning",
               machineId: id,
             });
           }
         }
+      } else {
+        node.warnings.push({
+          type: "disconnected",
+          message: `${machineInfo.label} input slot ${i} (${ri.item.replace(/_/g, " ")}) is not connected.`,
+          severity: "info",
+          machineId: id,
+        });
       }
 
-      const satisfaction = needed > 0 ? Math.min(1, available / needed) : 1;
-      if (satisfaction < minSatisfaction) {
-        minSatisfaction = satisfaction;
-      }
-
-      inputSlots.push({
-        item: recipeInput.item,
-        needed,
-        available,
-        source,
-      });
+      const sat = needed > 0 ? Math.min(1, available / needed) : 1;
+      if (sat < minSatisfaction) minSatisfaction = sat;
+      inputSlots.push({ item: ri.item, needed, available, source });
     }
 
     node.inputSatisfaction = minSatisfaction;
     node.inputSlots = inputSlots;
-
-    // Calculate actual output limited by input satisfaction
+    node.theoreticalOutput = cyclesPerMin * (recipe.outputs[0]?.amount ?? 0) * sloopMult;
     node.actualOutput = node.theoreticalOutput * minSatisfaction;
 
-    // Build output slots
-    const outputSlots: SimulationNode['outputSlots'] = [];
+    const outputSlots: SimulationNode["outputSlots"] = [];
     for (let i = 0; i < recipe.outputs.length; i++) {
-      const recipeOutput = recipe.outputs[i];
-      const produced = cyclesPerMin * recipeOutput.amount * minSatisfaction;
-
-      outputSlots.push({
-        item: recipeOutput.item,
-        produced,
-        consumed: 0,
-        surplus: produced,
-        destinations: [],
-      });
-
-      outputAvailable[id][i] = { item: recipeOutput.item, rate: produced };
+      const ro = recipe.outputs[i];
+      const produced = cyclesPerMin * ro.amount * sloopMult * minSatisfaction;
+      outputSlots.push({ item: ro.item, produced, consumed: 0, surplus: produced, destinations: [] });
+      outputAvailable[id][i] = { item: ro.item, rate: produced };
     }
     node.outputSlots = outputSlots;
 
-    // Power
     node.powerDraw = calcPowerAtOverclock(
       Math.abs(machineInfo.basePower),
       machineInfo.powerExponent,
-      machine.overclock
+      machine.overclock,
+      somersloops,
+      machineInfo.somersloopSlots,
     );
 
-    // Bottleneck warning
     if (minSatisfaction < 0.99) {
       node.warnings.push({
-        type: 'bottleneck',
+        type: "bottleneck",
         message: `${machineInfo.label} is starved — only ${(minSatisfaction * 100).toFixed(0)}% input satisfaction.`,
-        severity: 'warning',
+        severity: "warning",
         machineId: id,
       });
     }
-
-    // Disconnected inputs
-    for (let i = 0; i < recipe.inputs.length; i++) {
-      if (!machine.inputs[i]?.connectedTo) {
-        node.warnings.push({
-          type: 'disconnected',
-          message: `${machineInfo.label} input slot ${i} (${recipe.inputs[i].item.replace(/_/g, ' ')}) is not connected.`,
-          severity: 'info',
-          machineId: id,
-        });
-      }
-    }
   }
 
-  // Second pass: mark consumed amounts on output slots
+  // Second pass: track consumption + destination links on output slots.
   for (const machine of machines) {
-    for (const input of machine.inputs) {
-      if (input.connectedTo && input.itemType) {
-        const srcNode = nodes[input.connectedTo.machineId];
-        if (srcNode) {
-          const outputSlot = srcNode.outputSlots[input.connectedTo.slot];
-          if (outputSlot) {
-            const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
-            if (recipe) {
-              const inputDef = recipe.inputs.find(ri => ri.item === input.itemType);
-              if (inputDef) {
-                const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
-                const consumed = cyclesPerMin * inputDef.amount * nodes[machine.id].inputSatisfaction;
-                outputSlot.consumed += consumed;
-                outputSlot.surplus = outputSlot.produced - outputSlot.consumed;
-                outputSlot.destinations.push(machine.id);
-              }
-            }
-          }
+    machine.inputs.forEach((input, inIdx) => {
+      if (!input.connectedTo) return;
+      const srcNode = nodes[input.connectedTo.machineId];
+      if (!srcNode) return;
+      const slotIdx = input.connectedTo.slot;
+      const outputSlot = srcNode.outputSlots[slotIdx];
+      if (!outputSlot) return;
+      const node = nodes[machine.id];
+      const sat = node?.inputSatisfaction ?? 1;
+      const recipe = machine.recipe ? RECIPES.find(r => r.id === machine.recipe) : null;
+      if (recipe) {
+        const ri = recipe.inputs[inIdx];
+        if (ri) {
+          const cyclesPerMin = (60 / recipe.craft_time) * machine.overclock;
+          const consumed = cyclesPerMin * ri.amount * sat;
+          outputSlot.consumed += consumed;
+          outputSlot.surplus = outputSlot.produced - outputSlot.consumed;
         }
       }
-    }
+      outputSlot.destinations.push(machine.id);
+    });
   }
 
-  // Aggregate factory-wide stats
-  let totalPower = 0;
+  // Aggregate
+  let totalConsumption = 0;
+  let totalGeneration = 0;
   const totalItems: Record<string, { produced: number; consumed: number; net: number }> = {};
   const allWarnings: SimulationWarning[] = [];
   const criticalIssues: SimulationWarning[] = [];
 
   for (const node of Object.values(nodes)) {
-    totalPower += node.powerDraw;
+    if (node.powerDraw >= 0) totalConsumption += node.powerDraw;
+    else totalGeneration += -node.powerDraw;
 
     for (const os of node.outputSlots) {
       if (!totalItems[os.item]) totalItems[os.item] = { produced: 0, consumed: 0, net: 0 };
@@ -613,36 +645,33 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       if (!totalItems[is_.item]) totalItems[is_.item] = { produced: 0, consumed: 0, net: 0 };
       totalItems[is_.item].consumed += is_.needed * (node.inputSatisfaction);
     }
-
     for (const w of node.warnings) {
-      if (w.severity === 'error') criticalIssues.push(w);
+      if (w.severity === "error") criticalIssues.push(w);
       else allWarnings.push(w);
     }
   }
 
-  // Calculate net
   for (const item of Object.values(totalItems)) {
     item.net = item.produced - item.consumed;
   }
 
-  // External inputs (consumed but not produced)
   const externalInputs = Object.entries(totalItems)
     .filter(([, v]) => v.net < -0.01)
     .map(([item, v]) => ({ item, rate: Math.abs(v.net) }))
     .sort((a, b) => b.rate - a.rate);
 
-  // Final outputs (produced but not consumed)
   const finalOutputs = Object.entries(totalItems)
     .filter(([, v]) => v.net > 0.01)
     .map(([item, v]) => ({ item, rate: v.net }))
     .sort((a, b) => b.rate - a.rate);
 
-  // Generate suggestions for the new system
   const suggestions = generateFactorySuggestions(machines, nodes);
 
   return {
     nodes,
-    totalPower,
+    totalPower: totalConsumption - totalGeneration,
+    totalConsumption,
+    totalGeneration,
     totalItems,
     externalInputs,
     finalOutputs,
@@ -654,7 +683,7 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
 
 function generateFactorySuggestions(
   machines: MachineInstance[],
-  nodes: Record<string, SimulationNode>
+  nodes: Record<string, SimulationNode>,
 ): FactorySuggestion[] {
   const suggestions: FactorySuggestion[] = [];
 
@@ -664,25 +693,38 @@ function generateFactorySuggestions(
     const machineInfo = MACHINES[machine.machineType];
     if (!machineInfo) continue;
 
-    // Suggest recipe if not set
-    if (!node.recipe && machineInfo.category !== 'extraction' && machineInfo.category !== 'power') {
+    if (machineInfo.category === "extraction" && !machine.extractionItem) {
       suggestions.push({
-        type: 'fix_recipe',
+        type: "set_resource",
+        message: `Choose a resource node for ${machineInfo.label}.`,
+        impact: "Extractor stays idle until a resource is picked.",
+        machineId: machine.id,
+        priority: 110,
+      });
+      continue;
+    }
+
+    if (
+      !node.recipe &&
+      machineInfo.category !== "extraction" &&
+      machineInfo.category !== "power"
+    ) {
+      suggestions.push({
+        type: "fix_recipe",
         message: `Set a recipe for ${machineInfo.label}.`,
-        impact: 'Machine is idle without a recipe.',
+        impact: "Machine is idle without a recipe.",
         machineId: machine.id,
         priority: 100,
       });
       continue;
     }
 
-    // Suggest overclock reduction if over 100% and has surplus output
     if (machine.overclock > 1.01) {
       for (const os of node.outputSlots) {
         if (os.surplus > os.produced * 0.3) {
           suggestions.push({
-            type: 'change_overclock',
-            message: `Reduce overclock on ${machineInfo.label} — ${os.item.replace(/_/g, ' ')} has ${os.surplus.toFixed(1)}/min surplus.`,
+            type: "change_overclock",
+            message: `Reduce overclock on ${machineInfo.label} — ${os.item.replace(/_/g, " ")} has ${os.surplus.toFixed(1)}/min surplus.`,
             impact: `Save power by reducing from ${(machine.overclock * 100).toFixed(0)}% to 100%.`,
             machineId: machine.id,
             overclock: 1.0,
@@ -692,10 +734,9 @@ function generateFactorySuggestions(
       }
     }
 
-    // Suggest adding machines for starved inputs
     if (node.inputSatisfaction < 0.99 && node.inputSatisfaction > 0) {
       for (const is_ of node.inputSlots) {
-        if (is_.available < is_.needed && is_.source === 'external') {
+        if (is_.available < is_.needed && is_.source === "external") {
           const deficit = is_.needed - is_.available;
           const recipe = getRecipeForItem(is_.item);
           if (recipe) {
@@ -703,9 +744,9 @@ function generateFactorySuggestions(
             const count = Math.ceil(deficit / outputPerMachine);
             const mt = recipe.machine as keyof typeof MACHINES;
             suggestions.push({
-              type: 'add_machine',
-              message: `Add ${count} ${recipe.machine.replace(/_/g, ' ')}(s) producing ${is_.item.replace(/_/g, ' ')} to supply ${machineInfo.label}.`,
-              impact: `+${(outputPerMachine * count).toFixed(1)}/min ${is_.item.replace(/_/g, ' ')}`,
+              type: "add_machine",
+              message: `Add ${count} ${recipe.machine.replace(/_/g, " ")}(s) producing ${is_.item.replace(/_/g, " ")} to supply ${machineInfo.label}.`,
+              impact: `+${(outputPerMachine * count).toFixed(1)}/min ${is_.item.replace(/_/g, " ")}`,
               machineType: MACHINES[mt] ? mt : undefined,
               recipe: recipe.id,
               count,

@@ -22,11 +22,38 @@ import { Factory as FactoryIcon } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { MachineNode, type MachineNodeData } from "./MachineNode";
-import { MACHINES } from "@/data/machines";
+import { MACHINES, BELT_LIMITS, PIPE_LIMITS, DEFAULT_EXTRACTION_ITEM } from "@/data/machines";
 import { RECIPES, ITEMS } from "@/data/recipes";
 import { simulateFactory } from "@/lib/simulation";
-import type { MachineInstance, MachineType, FactorySimulationResult } from "@/types/factory";
+import type {
+  MachineInstance,
+  MachineType,
+  FactorySimulationResult,
+  ConnectionPoint,
+  FlowKind,
+} from "@/types/factory";
 import { cn } from "@/lib/utils";
+
+/** Pull the output item key from a source machine's recipe or extractionItem. */
+function resolveSourceOutputItem(machine: MachineInstance, slot: number): string | null {
+  const info = MACHINES[machine.machineType];
+  if (!info) return null;
+  if (info.category === "extraction") {
+    return machine.extractionItem ?? null;
+  }
+  if (machine.recipe) {
+    const recipe = RECIPES.find(r => r.id === machine.recipe);
+    return recipe?.outputs[slot]?.item ?? null;
+  }
+  return null;
+}
+
+function slotKindFor(machine: MachineInstance, slot: number, side: "input" | "output"): FlowKind {
+  const info = MACHINES[machine.machineType];
+  if (!info) return "item";
+  const itemSlots = side === "input" ? info.inputSlots : info.outputSlots;
+  return slot < itemSlots ? "item" : "fluid";
+}
 
 const nodeTypes = {
   machine: MachineNode,
@@ -115,39 +142,69 @@ export default function FactoryCanvas({
       const sourceSlot = parseInt(params.sourceHandle?.replace("output-", "") ?? "0");
       const targetSlot = parseInt(params.targetHandle?.replace("input-", "") ?? "0");
 
-      // Find what item the source outputs at this slot
       const sourceMachine = machines.find(m => m.id === params.source);
-      if (!sourceMachine?.recipe) return;
-      const sourceRecipe = RECIPES.find(r => r.id === sourceMachine.recipe);
-      const outputItem = sourceRecipe?.outputs[sourceSlot]?.item;
+      const targetMachine = machines.find(m => m.id === params.target);
+      if (!sourceMachine || !targetMachine) return;
 
-      // Update machines with new connection
+      const outputItem = resolveSourceOutputItem(sourceMachine, sourceSlot);
+      if (!outputItem) return;
+
+      // Reject mismatched flow kinds (item belt vs fluid pipe).
+      const srcKind = slotKindFor(sourceMachine, sourceSlot, "output");
+      const tgtKind = slotKindFor(targetMachine, targetSlot, "input");
+      if (srcKind !== tgtKind) return;
+
+      // Update both endpoints — target.inputs and source.outputs.
       const updatedMachines = machines.map(m => {
         if (m.id === params.target) {
           const newInputs = [...m.inputs];
-          // Ensure the slot array is large enough
           while (newInputs.length <= targetSlot) {
             newInputs.push({
               slot: newInputs.length,
+              kind: tgtKind,
               connectedTo: null,
               itemType: null,
               actualRate: 0,
-              maxRate: 780,
+              beltTier: tgtKind === "item" ? "belt_mk1" : undefined,
+              pipeTier: tgtKind === "fluid" ? "pipe_mk1" : undefined,
+              maxRate: tgtKind === "item" ? BELT_LIMITS.belt_mk1 : PIPE_LIMITS.pipe_mk1,
             });
           }
           newInputs[targetSlot] = {
             ...newInputs[targetSlot],
+            kind: tgtKind,
             connectedTo: { machineId: params.source!, slot: sourceSlot },
-            itemType: outputItem ?? null,
+            itemType: outputItem,
           };
           return { ...m, inputs: newInputs };
+        }
+        if (m.id === params.source) {
+          const newOutputs = [...m.outputs];
+          while (newOutputs.length <= sourceSlot) {
+            newOutputs.push({
+              slot: newOutputs.length,
+              kind: srcKind,
+              connectedTo: null,
+              itemType: null,
+              actualRate: 0,
+              beltTier: srcKind === "item" ? "belt_mk1" : undefined,
+              pipeTier: srcKind === "fluid" ? "pipe_mk1" : undefined,
+              maxRate: srcKind === "item" ? BELT_LIMITS.belt_mk1 : PIPE_LIMITS.pipe_mk1,
+            });
+          }
+          newOutputs[sourceSlot] = {
+            ...newOutputs[sourceSlot],
+            kind: srcKind,
+            connectedTo: { machineId: params.target!, slot: targetSlot },
+            itemType: outputItem,
+          };
+          return { ...m, outputs: newOutputs };
         }
         return m;
       });
 
       onMachinesChange(updatedMachines);
 
-      // Re-run simulation
       const result = simulateFactory(updatedMachines);
       onSimulationChange(result);
 
@@ -156,6 +213,8 @@ export default function FactoryCanvas({
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         style: { strokeWidth: 2 },
         animated: true,
+        label: ITEMS[outputItem]?.label ?? outputItem,
+        labelStyle: { fontSize: 10, fill: "var(--muted-foreground)" },
       }, eds));
     },
     [machines, onMachinesChange, onSimulationChange, setEdges],
@@ -188,25 +247,44 @@ export default function FactoryCanvas({
       onEdgesChange(changes);
 
       const removals = changes.filter(c => c.type === "remove");
-      if (removals.length > 0) {
-        const removedIds = new Set(removals.map(r => r.id));
-        // Find and disconnect the corresponding machine inputs
-        const updatedMachines = machines.map(m => {
-          const newInputs = m.inputs.map((inp, i) => {
-            if (inp.connectedTo) {
-              const edgeId = `${inp.connectedTo.machineId}-out${inp.connectedTo.slot}-${m.id}-in${i}`;
-              if (removedIds.has(edgeId)) {
-                return { ...inp, connectedTo: null, itemType: null, actualRate: 0 };
-              }
-            }
-            return inp;
-          });
-          return { ...m, inputs: newInputs };
+      if (removals.length === 0) return;
+
+      const removedIds = new Set(removals.map(r => r.id));
+      // First pass: find which (sourceId, sourceSlot, targetId, targetSlot) tuples were removed.
+      const droppedLinks: Array<{ source: string; sourceSlot: number; target: string; targetSlot: number }> = [];
+      for (const m of machines) {
+        m.inputs.forEach((inp, i) => {
+          if (!inp.connectedTo) return;
+          const edgeId = `${inp.connectedTo.machineId}-out${inp.connectedTo.slot}-${m.id}-in${i}`;
+          if (removedIds.has(edgeId)) {
+            droppedLinks.push({
+              source: inp.connectedTo.machineId,
+              sourceSlot: inp.connectedTo.slot,
+              target: m.id,
+              targetSlot: i,
+            });
+          }
         });
-        onMachinesChange(updatedMachines);
-        const result = simulateFactory(updatedMachines);
-        onSimulationChange(result);
       }
+
+      // Second pass: clear both sides.
+      const updatedMachines = machines.map(m => {
+        const newInputs = m.inputs.map((inp, i) => {
+          const hit = droppedLinks.find(d => d.target === m.id && d.targetSlot === i);
+          if (hit) return { ...inp, connectedTo: null, itemType: null, actualRate: 0 };
+          return inp;
+        });
+        const newOutputs = m.outputs.map((out, i) => {
+          const hit = droppedLinks.find(d => d.source === m.id && d.sourceSlot === i);
+          if (hit) return { ...out, connectedTo: null, itemType: null, actualRate: 0 };
+          return out;
+        });
+        return { ...m, inputs: newInputs, outputs: newOutputs };
+      });
+
+      onMachinesChange(updatedMachines);
+      const result = simulateFactory(updatedMachines);
+      onSimulationChange(result);
     },
     [machines, onMachinesChange, onSimulationChange, onEdgesChange],
   );
@@ -233,26 +311,52 @@ export default function FactoryCanvas({
       };
 
       const machineInfo = MACHINES[machineType];
+      const isExtractor = machineInfo.category === "extraction";
+
+      const buildInputs = (): ConnectionPoint[] => {
+        const arr: ConnectionPoint[] = [];
+        for (let i = 0; i < machineInfo.inputSlots; i++) {
+          arr.push({
+            slot: arr.length, kind: "item", connectedTo: null, itemType: null, actualRate: 0,
+            beltTier: "belt_mk1", maxRate: BELT_LIMITS.belt_mk1,
+          });
+        }
+        for (let i = 0; i < machineInfo.fluidInputs; i++) {
+          arr.push({
+            slot: arr.length, kind: "fluid", connectedTo: null, itemType: null, actualRate: 0,
+            pipeTier: "pipe_mk1", maxRate: PIPE_LIMITS.pipe_mk1,
+          });
+        }
+        return arr;
+      };
+      const buildOutputs = (): ConnectionPoint[] => {
+        const arr: ConnectionPoint[] = [];
+        for (let i = 0; i < machineInfo.outputSlots; i++) {
+          arr.push({
+            slot: arr.length, kind: "item", connectedTo: null, itemType: null, actualRate: 0,
+            beltTier: "belt_mk1", maxRate: BELT_LIMITS.belt_mk1,
+          });
+        }
+        for (let i = 0; i < machineInfo.fluidOutputs; i++) {
+          arr.push({
+            slot: arr.length, kind: "fluid", connectedTo: null, itemType: null, actualRate: 0,
+            pipeTier: "pipe_mk1", maxRate: PIPE_LIMITS.pipe_mk1,
+          });
+        }
+        return arr;
+      };
+
       const newMachine: MachineInstance = {
         id: nanoid(8),
         machineType,
-        recipe: machineInfo.compatibleRecipes[0] ?? null,
+        recipe: isExtractor ? null : (machineInfo.compatibleRecipes[0] ?? null),
         overclock: 1.0,
         position,
-        inputs: Array.from({ length: machineInfo.inputSlots + machineInfo.fluidInputs }, (_, i) => ({
-          slot: i,
-          connectedTo: null,
-          itemType: null,
-          actualRate: 0,
-          maxRate: 780,
-        })),
-        outputs: Array.from({ length: machineInfo.outputSlots + machineInfo.fluidOutputs }, (_, i) => ({
-          slot: i,
-          connectedTo: null,
-          itemType: null,
-          actualRate: 0,
-          maxRate: 780,
-        })),
+        extractionItem: isExtractor ? (DEFAULT_EXTRACTION_ITEM[machineType] ?? null) : undefined,
+        nodePurity: isExtractor ? "normal" : undefined,
+        somersloops: 0,
+        inputs: buildInputs(),
+        outputs: buildOutputs(),
       };
 
       const updatedMachines = [...machines, newMachine];
