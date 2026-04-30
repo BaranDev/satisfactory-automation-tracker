@@ -46,13 +46,11 @@ async def _ratelimit_handler(_request: Request, _exc: RateLimitExceeded) -> Resp
 
 
 # ─── Body size cap ───────────────────────────────────────────────
-# Two layers:
-#   1. Reject early if Content-Length declares too much.
-#   2. For chunked transfer-encoding (no Content-Length), drain the
-#      stream ourselves with a running tally and abort once we exceed
-#      the cap. We then replace `request._receive` with a generator
-#      that replays the buffered body so downstream handlers behave
-#      normally.
+# Reject early when Content-Length exceeds MAX_BODY_BYTES. Chunked
+# uploads (no Content-Length) bypass this check at the FastAPI layer,
+# but nginx upstream enforces `client_max_body_size` (frontend/nginx.conf)
+# so the public path is still bounded. Backend is only reachable from
+# the dokploy-network overlay.
 @app.middleware("http")
 async def _enforce_body_cap(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -73,28 +71,6 @@ async def _enforce_body_cap(
                 media_type="application/json",
                 status_code=400,
             )
-
-    # Read+buffer the body so chunked uploads also get capped.
-    body = b""
-    more_body = True
-    while more_body:
-        message = await request.receive()
-        if message["type"] != "http.request":
-            continue
-        chunk = message.get("body", b"") or b""
-        body += chunk
-        if len(body) > cap:
-            return Response(
-                content='{"detail":"Request body too large."}',
-                media_type="application/json",
-                status_code=413,
-            )
-        more_body = message.get("more_body", False)
-
-    async def _replay() -> dict:
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    request._receive = _replay  # type: ignore[attr-defined]
     return await call_next(request)
 
 
