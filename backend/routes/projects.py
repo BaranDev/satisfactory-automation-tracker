@@ -8,7 +8,7 @@ import storage
 from models import ProjectUpdateRequest
 import config
 import auth
-from limits import limiter
+from rate_limit import limiter
 
 router = APIRouter(prefix="/api", tags=["projects"])
 

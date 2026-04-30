@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 
 import config
 import storage
-from limits import limiter
+from rate_limit import limiter
 from routes import projects, assets
 
 
