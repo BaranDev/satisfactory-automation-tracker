@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { ITEMS, RECIPES } from "@/data/recipes";
-import { MACHINES, DEFAULT_EXTRACTION_ITEM, BELT_LIMITS, PIPE_LIMITS } from "@/data/machines";
+import {
+  MACHINES,
+  DEFAULT_EXTRACTION_ITEM,
+  DEFAULT_ITEM_SOURCE_RATE,
+  BELT_LIMITS,
+  PIPE_LIMITS,
+} from "@/data/machines";
 import {
   simulate as runSimulation,
   simulateFactory,
@@ -99,6 +105,8 @@ interface ProjectStore {
   updateMachineExtractionItem: (machineId: string, item: string | null) => void;
   updateMachineNodePurity: (machineId: string, purity: NodePurity) => void;
   updateMachineSomersloops: (machineId: string, count: number) => void;
+  updateMachineSourceItem: (machineId: string, item: string | null) => void;
+  updateMachineSourceRate: (machineId: string, rate: number) => void;
   updateMachinePosition: (machineId: string, position: { x: number; y: number }) => void;
   setFactoryMachines: (machines: MachineInstance[]) => void;
   selectMachine: (machineId: string | null) => void;
@@ -419,16 +427,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const info = MACHINES[machineType];
     const { inputs, outputs } = makeEmptyConnectionPoints(machineType);
     const isExtractor = info?.category === "extraction";
+    const isItemSource = machineType === "item_source";
 
     const newMachine: MachineInstance = {
       id,
       machineType,
-      recipe: isExtractor ? null : (info?.compatibleRecipes[0] ?? null),
+      recipe: isExtractor || isItemSource ? null : (info?.compatibleRecipes[0] ?? null),
       overclock: 1.0,
       position: position ?? { x: Math.random() * 400 + 100, y: Math.random() * 300 + 100 },
-      extractionItem: isExtractor ? (DEFAULT_EXTRACTION_ITEM[machineType] ?? null) : undefined,
+      extractionItem:
+        isExtractor || isItemSource ? (DEFAULT_EXTRACTION_ITEM[machineType] ?? null) : undefined,
       nodePurity: isExtractor ? "normal" : undefined,
       somersloops: 0,
+      sourceRate: isItemSource ? DEFAULT_ITEM_SOURCE_RATE : undefined,
       inputs,
       outputs,
     };
@@ -469,6 +480,45 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const max = info?.somersloopSlots ?? 0;
       return { ...m, somersloops: Math.max(0, Math.min(max, count)) };
     });
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+    set({ factorySimulation: simulateFactory(updated) });
+  },
+
+  /** ItemSource: pick the item being supplied. Flips the single output
+   *  slot's kind to match the item's fluid/solid nature so connection
+   *  validation routes it through the right belt vs pipe rule. */
+  updateMachineSourceItem: (machineId: string, item: string | null) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m => {
+      if (m.id !== machineId) return m;
+      const isFluid = !!(item && ITEMS[item]?.isFluid);
+      const newOutputs = m.outputs.length > 0
+        ? m.outputs.map((o, i) =>
+            i === 0
+              ? {
+                  ...o,
+                  kind: (isFluid ? "fluid" : "item") as "fluid" | "item",
+                  itemType: item,
+                  // Disconnect any existing wire if its kind no longer matches.
+                  connectedTo: o.kind === (isFluid ? "fluid" : "item") ? o.connectedTo : null,
+                  beltTier: isFluid ? undefined : (o.beltTier ?? "belt_mk1"),
+                  pipeTier: isFluid ? (o.pipeTier ?? "pipe_mk1") : undefined,
+                  maxRate: isFluid ? PIPE_LIMITS.pipe_mk1 : BELT_LIMITS.belt_mk1,
+                }
+              : o,
+          )
+        : m.outputs;
+      return { ...m, extractionItem: item, outputs: newOutputs };
+    });
+    set({ factoryMachines: updated, syncStatus: "local_changes" });
+    set({ factorySimulation: simulateFactory(updated) });
+  },
+
+  updateMachineSourceRate: (machineId: string, rate: number) => {
+    const { factoryMachines } = get();
+    const updated = factoryMachines.map(m =>
+      m.id === machineId ? { ...m, sourceRate: Math.max(0, rate) } : m,
+    );
     set({ factoryMachines: updated, syncStatus: "local_changes" });
     set({ factorySimulation: simulateFactory(updated) });
   },

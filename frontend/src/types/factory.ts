@@ -8,7 +8,8 @@ export type MachineType =
   | 'particle_accelerator' | 'converter' | 'quantum_encoder'
   | 'water_extractor' | 'oil_extractor' | 'resource_well_pressurizer'
   | 'coal_generator' | 'fuel_generator' | 'nuclear_power_plant'
-  | 'geothermal_generator' | 'biomass_burner';
+  | 'geothermal_generator' | 'biomass_burner'
+  | 'item_source';
 
 export type NodePurity = 'impure' | 'normal' | 'pure';
 
@@ -48,6 +49,9 @@ export interface MachineInstance {
 
   /** Number of Somersloops installed (production amplifier). */
   somersloops?: number;
+
+  /** ItemSource only: items/min the user feeds in manually. */
+  sourceRate?: number;
 
   inputs: ConnectionPoint[];
   outputs: ConnectionPoint[];

@@ -209,6 +209,18 @@ export const MACHINES: Record<MachineType, MachineInfo> = {
     somersloopSlots: 0, compatibleRecipes: [],
     footprint: { width: 5, length: 5 },
   },
+
+  // ─── Logistics / virtual ───────────────────────────────────────
+  item_source: {
+    key: 'item_source', label: 'Item Source', icon: 'package.webp', category: 'logistics',
+    basePower: 0, powerExponent: 1.0,
+    // Output slot kind is flipped at runtime (item vs fluid) based on the
+    // selected `extractionItem` — start as a generic item slot; the store
+    // rewrites it when the user picks a fluid.
+    inputSlots: 0, outputSlots: 1, fluidInputs: 0, fluidOutputs: 0,
+    somersloopSlots: 0, compatibleRecipes: [],
+    footprint: { width: 1, length: 1 },
+  },
 };
 
 /** Get all machines in a category */
@@ -295,7 +307,11 @@ export const DEFAULT_EXTRACTION_ITEM: Record<string, string | null> = {
   water_extractor: 'water',
   oil_extractor: 'crude_oil',
   resource_well_pressurizer: null,
+  item_source: null,
 };
+
+/** ItemSource default rate (items/min). */
+export const DEFAULT_ITEM_SOURCE_RATE = 60;
 
 /** Category display labels */
 export const CATEGORY_LABELS: Record<MachineCategory, string> = {

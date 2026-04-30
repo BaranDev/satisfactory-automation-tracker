@@ -418,10 +418,16 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
 
     if (!machineInfo) continue;
 
-    if (machineInfo.category === "extraction" && !m.extractionItem) {
+    if (
+      (machineInfo.category === "extraction" || m.machineType === "item_source") &&
+      !m.extractionItem
+    ) {
       nodes[m.id].warnings.push({
         type: "no_resource",
-        message: `${machineInfo.label} has no resource selected.`,
+        message:
+          m.machineType === "item_source"
+            ? `${machineInfo.label} has no item selected.`
+            : `${machineInfo.label} has no resource selected.`,
         severity: "error",
         machineId: m.id,
       });
@@ -430,7 +436,8 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
     if (
       !recipe &&
       machineInfo.category !== "extraction" &&
-      machineInfo.category !== "power"
+      machineInfo.category !== "power" &&
+      m.machineType !== "item_source"
     ) {
       nodes[m.id].warnings.push({
         type: "no_recipe",
@@ -464,8 +471,11 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
     if (!machineInfo) continue;
     const somersloops = machine.somersloops ?? 0;
 
-    // ─── Extraction ────────────────────────────────
-    if (machineInfo.category === "extraction") {
+    // ─── Extraction + virtual item source ──────────
+    if (
+      machineInfo.category === "extraction" ||
+      machine.machineType === "item_source"
+    ) {
       const outputItem = machine.extractionItem ?? null;
       if (!outputItem) {
         node.theoreticalOutput = 0;
@@ -475,7 +485,10 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
         continue;
       }
 
-      const rate = extractorRate(machine);
+      const rate =
+        machine.machineType === "item_source"
+          ? (machine.sourceRate ?? 60) * machine.overclock
+          : extractorRate(machine);
       node.theoreticalOutput = rate;
       node.actualOutput = rate;
       node.inputSatisfaction = 1;
@@ -488,12 +501,15 @@ export function simulateFactory(machines: MachineInstance[]): FactorySimulationR
       }];
       outputAvailable[id][0] = { item: outputItem, rate };
 
-      node.powerDraw = calcPowerAtOverclock(
-        Math.abs(machineInfo.basePower),
-        machineInfo.powerExponent,
-        machine.overclock,
-        0, 0,                         // extractors do not amp
-      );
+      node.powerDraw =
+        machine.machineType === "item_source"
+          ? 0
+          : calcPowerAtOverclock(
+              Math.abs(machineInfo.basePower),
+              machineInfo.powerExponent,
+              machine.overclock,
+              0, 0,                         // extractors do not amp
+            );
       continue;
     }
 

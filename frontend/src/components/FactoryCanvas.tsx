@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 function resolveSourceOutputItem(machine: MachineInstance, slot: number): string | null {
   const info = MACHINES[machine.machineType];
   if (!info) return null;
-  if (info.category === "extraction") {
+  if (info.category === "extraction" || machine.machineType === "item_source") {
     return machine.extractionItem ?? null;
   }
   if (machine.recipe) {
@@ -51,6 +51,12 @@ function resolveSourceOutputItem(machine: MachineInstance, slot: number): string
 function slotKindFor(machine: MachineInstance, slot: number, side: "input" | "output"): FlowKind {
   const info = MACHINES[machine.machineType];
   if (!info) return "item";
+  // ItemSource flips its single output slot kind based on the chosen
+  // item — read the live value from the slot itself rather than the
+  // static MachineInfo layout.
+  if (machine.machineType === "item_source" && side === "output") {
+    return machine.outputs[slot]?.kind ?? "item";
+  }
   const itemSlots = side === "input" ? info.inputSlots : info.outputSlots;
   return slot < itemSlots ? "item" : "fluid";
 }

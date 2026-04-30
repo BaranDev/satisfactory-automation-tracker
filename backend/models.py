@@ -35,6 +35,7 @@ class MachineInstance(BaseModel):
     extractionItem: Optional[str] = None
     nodePurity: Optional[Literal["impure", "normal", "pure"]] = None
     somersloops: int = 0
+    sourceRate: Optional[float] = None
     inputs: list[ConnectionPoint] = Field(default_factory=list)
     outputs: list[ConnectionPoint] = Field(default_factory=list)
 

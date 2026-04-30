@@ -46,6 +46,8 @@ export default function ProjectPage() {
     updateMachineExtractionItem,
     updateMachineNodePurity,
     updateMachineSomersloops,
+    updateMachineSourceItem,
+    updateMachineSourceRate,
     setFactoryMachines,
     setFactorySimulation,
   } = useProjectStore();
@@ -320,6 +322,8 @@ export default function ProjectPage() {
                   onExtractionItemChange={updateMachineExtractionItem}
                   onNodePurityChange={updateMachineNodePurity}
                   onSomersloopsChange={updateMachineSomersloops}
+                  onSourceItemChange={updateMachineSourceItem}
+                  onSourceRateChange={updateMachineSourceRate}
                   onDelete={removeMachine}
                 />
               ) : (
