@@ -40,13 +40,16 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
-      # HTTP router: redirect to HTTPS
+      # HTTP router: serve the SPA directly. Cloudflare's "Always Use
+      # HTTPS" page rule enforces HTTPS at the edge — adding a Traefik
+      # redirectScheme here would loop because Cloudflare proxy hits
+      # origin on port 80 (Flexible SSL between edge and origin).
       - traefik.http.routers.sap-web.rule=Host(`sap.cevdetbaran.com`)
       - traefik.http.routers.sap-web.entrypoints=web
-      - traefik.http.routers.sap-web.middlewares=sap-redirect@docker
-      - traefik.http.middlewares.sap-redirect.redirectscheme.scheme=https
-      - traefik.http.middlewares.sap-redirect.redirectscheme.permanent=true
-      # HTTPS router: terminate TLS via Let's Encrypt + serve the SPA
+      - traefik.http.routers.sap-web.service=sap-svc
+      # HTTPS router: also terminate TLS at origin via Let's Encrypt so
+      # CF can talk to us in Full (strict) mode if the user upgrades the
+      # SSL setting later. Same backend service.
       - traefik.http.routers.sap-secure.rule=Host(`sap.cevdetbaran.com`)
       - traefik.http.routers.sap-secure.entrypoints=websecure
       - traefik.http.routers.sap-secure.tls=true
